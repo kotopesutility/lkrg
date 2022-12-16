@@ -1,3 +1,2 @@
-tar: v0.9.5-7-gf32f627:. name=lkrg-@version@ base=lkrg-@version@
-diff: v0.9.5-7-gf32f627:. alt-rhel9:.
+tar: v@version@:. name=lkrg-@version@ base=lkrg-@version@
 copy: lkrg.init
