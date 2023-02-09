@@ -1,2 +1,3 @@
 tar: v@version@:. name=lkrg-@version@ base=lkrg-@version@
+diff: v@version@:. rhel9.2-aarch64-unwind_state:.
 copy: lkrg.init
