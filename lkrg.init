@@ -117,6 +117,22 @@ stop()
 		return $RETVAL
 	fi
 
+	echo "$NAME is not supposed to be stopped, reboot the system or invoke 'unload' at your own risk."
+
+	RETVAL=0
+	return $RETVAL
+}
+
+unload()
+{
+	if ! check_running; then
+		msg_not_running "$NAME"
+		echo
+		rm -f "$LOCKFILE"
+		RETVAL=0
+		return $RETVAL
+	fi
+
 	get_modname
 
 	msg_stopping "$NAME"
@@ -159,6 +175,9 @@ case "$1" in
 	stop)
 		stop
 		;;
+	unload)
+		unload
+		;;
 	reload)
 		reload
 		;;
@@ -199,7 +218,7 @@ case "$1" in
 		fi
 		;;
 	*)
-		msg_usage "${0##*/} {start|stop|reload|restart|condstop|condrestart|condreload|status}"
+		msg_usage "${0##*/} {start|stop|unload|reload|restart|condstop|condrestart|condreload|status}"
 		RETVAL=1
 esac
 
