@@ -1,4 +1,5 @@
 %define _unpackaged_files_terminate_build 1
+%define _stripped_files_terminate_build 1
 %set_verify_elf_method strict
 
 Name: lkrg
@@ -79,7 +80,7 @@ additional userspace utilities.
 cp -a %SOURCE1 .
 
 %build
-%make_build -C %name-%version/logger
+%make_build -C %name-%version/logger LDFLAGS=""
 
 %install
 mkdir -p %kernel_srcdir
