@@ -1,4 +1,5 @@
 %define _unpackaged_files_terminate_build 1
+%set_verify_elf_method strict
 
 Name: lkrg
 Version: 0.9.7
