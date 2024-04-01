@@ -8,8 +8,9 @@ LKRG is a kernel module (not a kernel patch), so it can be built for and loaded
 on top of a wide range of mainline and distros' kernels, without needing to
 patch those.  We currently support kernel versions ranging from as far back as
 RHEL7's (and its many clones/revisions) and Ubuntu 16.04's to latest mainline
-and distros' kernels.  We've tested this revision of LKRG with Linux kernels
-up to and including 6.5, and slightly beyond.
+and distros' kernels.  Our Continuous Integration setup has tested this version
+of LKRG with up to latest mainline kernel 6.8.0-060800rc6daily20240227-generic
+as available for Ubuntu on the release date.
 
 LKRG currently supports the x86-64, 32-bit x86, AArch64 (ARM64), and 32-bit ARM
 CPU architectures.
@@ -33,9 +34,9 @@ like the below:
 
 	wget https://www.openwall.com/signatures/openwall-offline-signatures.asc
 	gpg --import openwall-offline-signatures.asc
-	wget https://lkrg.org/download/lkrg-0.9.7.tar.gz.sign
-	wget https://lkrg.org/download/lkrg-0.9.7.tar.gz
-	gpg --verify lkrg-0.9.7.tar.gz.sign lkrg-0.9.7.tar.gz
+	wget https://lkrg.org/download/lkrg-0.9.8.tar.gz.sign
+	wget https://lkrg.org/download/lkrg-0.9.8.tar.gz
+	gpg --verify lkrg-0.9.8.tar.gz.sign lkrg-0.9.8.tar.gz
 
 Please preserve the GnuPG key above and also use it to verify future releases,
 which will most likely work in a similar manner.
@@ -53,19 +54,22 @@ To build LKRG, you will need the following software:
 
 - GNU make
 
-- A C compiler (ideally, the same that was used to build the kernel itself)
+- GCC, ideally the same version of it that was used to build the kernel itself
+  (some people manage with clang, but this is unsupported, so expect issues)
+
+- libelf, including its "development" sub-package, in case your target kernel
+  was built with CONFIG_UNWINDER_ORC=y
 
 - A kernel build directory corresponding to the Linux kernel image the module
-  is to run on.  For example, under Debian and Ubuntu, each linux-image package
-  containing a kernel binary has a corresponding linux-headers package with the
-  required build infrastructure, which you can install with:
+  is to run on.
 
-	sudo apt-get install linux-headers-$(uname -r)
+For example, under Debian and Ubuntu you can install all of these with:
 
-  Red Hat'ish (e.g. RHEL, CentOS, Fedora) distributions call this package
-  kernel-devel, which you can install with:
+	sudo apt-get install make gcc libelf-dev linux-headers-$(uname -r)
 
-	sudo yum install kernel-devel
+and under Red Hat'ish distributions (e.g. RHEL, CentOS, Fedora) with:
+
+	sudo yum install make gcc elfutils-libelf-devel kernel-devel
 
 (For documentation purposes, we prefix commands requiring root access with
 "sudo", but you may of course run them as root by different means.)
@@ -176,12 +180,12 @@ What this means in effect is that on kernel upgrades the module is rebuilt.
 You can install LKRG using DKMS as well.  For instance, on Red Hat'ish
 distributions after following the shared download instructions above:
 
-	sudo tar -xzf lkrg-0.9.7.tar.gz -C /usr/src/
+	sudo tar -xzf lkrg-0.9.8.tar.gz -C /usr/src/
 	sudo dnf update -y
 	sudo dnf install kernel-devel dkms openssl
-	sudo dkms add -m lkrg -v 0.9.7
-	sudo dkms build -m lkrg -v 0.9.7
-	sudo dkms install -m lkrg -v 0.9.7
+	sudo dkms add -m lkrg -v 0.9.8
+	sudo dkms build -m lkrg -v 0.9.8
+	sudo dkms install -m lkrg -v 0.9.8
 
 The only difference on other distributions should be the installation of the
 kernel headers, the DKMS utility, and OpenSSL.  Install the headers for the
@@ -193,7 +197,7 @@ You can then query the status with:
 
 If everything is right, you should get similar output to the following:
 
-	lkrg/0.9.7, 5.18.9-200.fc36.x86_64, x86_64: installed
+	lkrg/0.9.8, 5.18.9-200.fc36.x86_64, x86_64: installed
 
 Please refer to the previous two sections for how to start the LKRG service or
 have it started on system bootup.  If you wish to use the unit/init file, you
@@ -212,7 +216,7 @@ while you're in the top level source code directory of the installed version.
 
 If you installed using DKMS, you'd uninstall with:
 
-	sudo dkms remove -m lkrg/0.9.7 --all
+	sudo dkms remove -m lkrg/0.9.8 --all
 
 You can also use the following command to temporarily stop the LKRG service
 without uninstalling it, for systemd:
@@ -268,15 +272,39 @@ With LKRG installed on the system, you can list them with:
 
 (Depending on system configuration, "modinfo" might not require root.)
 
-Parameters can be specified on command-lines of "insmod", "modprobe", or in a
-file in the /etc/modprobe.d directory.
+Parameters can be specified on command-lines of "insmod", "modprobe", or after
+"options lkrg " in a file in the /etc/modprobe.d directory.
 
 For descriptions of the parameters and their default and possible values,
-please refer to the following section.
+please refer to the following two sections.
 
 
-Runtime configuration
----------------------
+Remote logging configuration (load-time only)
+---------------------------------------------
+
+LKRG supports the following module parameters (with default values or lack
+thereof specified in braces) to enable its optional remote logging.
+
+- net_server_addr (no default)
+  Log server IPv4 address (e.g., 127.0.0.1)
+
+- net_server_port (514)
+  Log server TCP port number
+
+- net_server_pk (no default)
+  Log server public key (64 hexadecimal digits)
+
+If you're starting LKRG via a systemd unit or startup script (such as those
+provided in here), our recommended way to specify the above parameters is by
+creating the file /etc/modprobe.d/lkrg.conf with something like this in it:
+
+options lkrg net_server_addr=127.0.0.1 net_server_pk=64hexdigitshere
+
+Please refer to LOGGING on how to use the corresponding userspace components.
+
+
+Load-time and runtime configuration
+-----------------------------------
 
 Besides the parameters optionally specified when loading the module into the
 kernel, LKRG also supports a number of sysctl's, which can be used to adjust

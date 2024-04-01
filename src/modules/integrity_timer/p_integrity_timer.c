@@ -16,6 +16,7 @@
  */
 
 #include "../../p_lkrg_main.h"
+#include "../net/net.h"
 
 /*
  * Local timer for integrity checks...
@@ -92,6 +93,7 @@ void p_offload_work(struct timer_list *p_timer) {
    INIT_WORK(p_worker, p_check_integrity);
    /* schedule for execution */
    queue_work(system_unbound_wq, p_worker);
+   lkrg_queue_net();
    if (p_timer)
       p_integrity_timer();
 }
@@ -291,7 +293,7 @@ void p_check_integrity(struct work_struct *p_work) {
       for (p_tmp = 0; p_tmp < p_db.kernel_stext.p_size; p_tmp++) {
          if (p_str2[p_tmp] != p_str1[p_tmp]) {
             sprint_symbol_no_offset(p_eh_buf,(unsigned long)((unsigned long)p_db.kernel_stext.p_addr+(unsigned long)p_tmp));
-            p_print_log(P_LOG_WATCH, "copy[0x%x] vs now[0x%x] offset[%d | 0x%x] symbol[%s]",
+            p_print_log(P_LOG_ISSUE, "copy[0x%x] vs now[0x%x] offset[%d | 0x%x] symbol[%s]",
                    p_str2[p_tmp],
                    p_str1[p_tmp],
                    p_tmp,
