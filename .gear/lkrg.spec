@@ -80,7 +80,8 @@ additional userspace utilities.
 cp -a %SOURCE1 .
 
 %build
-%make_build -C %name-%version/logger LDFLAGS=""
+%add_optflags %(getconf LFS_CFLAGS)
+%make_build -C %name-%version/logger LDFLAGS="" CFLAGS="%optflags"
 
 %install
 mkdir -p %kernel_srcdir
