@@ -28,8 +28,12 @@ static struct kretprobe p_lkrg_dummy_kretprobe = {
     .entry_handler = p_lkrg_dummy_entry,
 };
 
+#ifdef __clang__
+__attribute__((optnone))
+#else
 __attribute__((optimize(0)))
-noinline int lkrg_dummy(int arg) {
+#endif
+static noinline int lkrg_dummy(int arg) {
 
    p_debug_log(P_LOG_DEBUG,
           "[lkrg_dummy] Argument value: [%d]\n",arg);

@@ -52,7 +52,16 @@ int p_offload_cache_init(void) {
 
 void p_offload_cache_delete(void) {
 
+#ifdef flush_workqueue
+/*
+ * When flush_workqueue became a macro, it started emitting warnings and the
+ * below function was introduced in place of the original function.  We should
+ * avoid flushing a system queue, but meanwhile we just suppress the warnings.
+ */
+   __flush_workqueue(system_unbound_wq);
+#else
    flush_workqueue(system_unbound_wq);
+#endif
    if (p_offload_cache) {
       kmem_cache_destroy(p_offload_cache);
       p_offload_cache = NULL;
