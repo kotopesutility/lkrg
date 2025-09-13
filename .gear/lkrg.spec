@@ -3,8 +3,8 @@
 %set_verify_elf_method strict
 
 Name: lkrg
-Version: 0.9.9
-Release: alt2
+Version: 1.0.0
+Release: alt1
 
 Summary: Linux Kernel Runtime Guard module
 License: GPL-2.0-only
@@ -153,6 +153,9 @@ test $1 -eq 1 && ! test -s %_sysconfdir/lkrg-logger.conf && lkrg-keygen > %_sysc
 %_unitdir/lkrg-logger.service
 
 %changelog
+* Sat Sep 13 2025 Vitaly Chikunov <vt@altlinux.org> 1.0.0-alt1
+- Update to v1.0.0 (2025-09-02).
+
 * Sat Dec 07 2024 Vitaly Chikunov <vt@altlinux.org> 0.9.9-alt2
 - Fix FTBFS after un-def flavour is gone.
 
