@@ -126,12 +126,6 @@ touch %buildroot%_sysconfdir/lkrg-logger.conf
 bash -n lkrg.init
 shellcheck -x lkrg.init
 
-# Just a test build on un-def kernel.
-cd %name-%version
-for V in $(ls /lib/modules); do
-	make -s %_smp_mflags KERNELRELEASE=$V
-done
-
 %triggerun common -- lkrg-config < 0.9.2.0.1.git10ba314-alt2 lkrg-common < 0.9.2.0.1.git10ba314-alt2
 if [ -e %_sysconfdir/sysctl.d/lkrg.conf ]; then
 	echo "Migrating an LKRG config to the new place"
