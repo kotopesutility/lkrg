@@ -117,15 +117,6 @@ touch %buildroot%_sysconfdir/lkrg-logger.conf
 bash -n lkrg.init
 shellcheck -x lkrg.init
 
-%triggerun common -- lkrg-config < 0.9.2.0.1.git10ba314-alt2 lkrg-common < 0.9.2.0.1.git10ba314-alt2
-if [ -e %_sysconfdir/sysctl.d/lkrg.conf ]; then
-	echo "Migrating an LKRG config to the new place"
-	if ! diff -q %_sysconfdir/{,sysctl.d/}lkrg.conf >/dev/null; then
-		mv %_sysconfdir/lkrg.conf{,.rpmnew}
-	fi
-	mv %_sysconfdir/sysctl.d/lkrg.conf %_sysconfdir/lkrg.conf
-fi
-
 %preun common
 %preun_service lkrg
 
