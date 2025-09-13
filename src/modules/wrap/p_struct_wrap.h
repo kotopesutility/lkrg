@@ -227,7 +227,7 @@ static inline int p_ddebug_remove_module(const char *p_name) {
 
 #else
 
-   return P_SYM(p_ddebug_remove_module)(p_name);
+   return P_SYM_CALL(p_ddebug_remove_module, p_name);
 
 #endif
 
@@ -437,9 +437,9 @@ static inline void p_syscall_set_arg2(struct pt_regs *p_regs, unsigned long p_va
 static inline int p_set_memory_rw(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return P_SYM(p_set_memory_rw)(p_addr, p_numpages);
+   return P_SYM_CALL(p_set_memory_rw, p_addr, p_numpages);
 #else
-   return P_SYM(p_change_page_attr_set_clr)(&p_addr, p_numpages,
+   return P_SYM_CALL(p_change_page_attr_set_clr, &p_addr, p_numpages,
                                             __pgprot(_PAGE_RW),
                                             __pgprot(0),
                                             0, 0, NULL);
@@ -449,11 +449,11 @@ static inline int p_set_memory_rw(unsigned long p_addr, int p_numpages) {
 static inline int p_set_memory_ro(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return P_SYM(p_set_memory_ro)(p_addr, p_numpages);
+   return P_SYM_CALL(p_set_memory_ro, p_addr, p_numpages);
 #else
-   return P_SYM(p_change_page_attr_set_clr)(&p_addr, p_numpages,
+   return P_SYM_CALL(p_change_page_attr_set_clr, &p_addr, p_numpages,
                                             __pgprot(0),
-                                            __pgprot(_PAGE_RW),
+                                            __pgprot(_PAGE_RW|_PAGE_DIRTY),
                                             0, 0, NULL);
 #endif
 }
@@ -461,10 +461,9 @@ static inline int p_set_memory_ro(unsigned long p_addr, int p_numpages) {
 static inline int p_set_memory_np(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return 0x0;
-//   return P_SYM(p_set_memory_np)(p_addr, p_numpages);
+   return 0;
 #else
-   return P_SYM(p_change_page_attr_set_clr)(&p_addr, p_numpages,
+   return P_SYM_CALL(p_change_page_attr_set_clr, &p_addr, p_numpages,
                                             __pgprot(0),
                                             __pgprot(_PAGE_PRESENT),
                                             0, 0, NULL);
@@ -474,9 +473,9 @@ static inline int p_set_memory_np(unsigned long p_addr, int p_numpages) {
 static inline int p_set_memory_p(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return 0x0;
+   return 0;
 #else
-   return P_SYM(p_change_page_attr_set_clr)(&p_addr, p_numpages,
+   return P_SYM_CALL(p_change_page_attr_set_clr, &p_addr, p_numpages,
                                             __pgprot(_PAGE_PRESENT),
                                             __pgprot(0),
                                             0, 0, NULL);
@@ -485,7 +484,7 @@ static inline int p_set_memory_p(unsigned long p_addr, int p_numpages) {
 
 static inline void p_lkrg_open_rw_x86(void) {
 
-   register unsigned long p_cr0;
+   unsigned long p_cr0;
 
    preempt_disable();
    barrier();
@@ -496,7 +495,7 @@ static inline void p_lkrg_open_rw_x86(void) {
 
 static inline void p_lkrg_close_rw_x86(void) {
 
-   register unsigned long p_cr0;
+   unsigned long p_cr0;
 
    barrier();
    p_cr0 = read_cr0() ^ X86_CR0_WP;
@@ -506,9 +505,6 @@ static inline void p_lkrg_close_rw_x86(void) {
 }
 
 static inline void p_lkrg_open_rw(void) {
-
-   unsigned long p_flags;
-
    mutex_lock(&p_ro_page_mutex);
 
 //   preempt_disable();
@@ -517,9 +513,7 @@ static inline void p_lkrg_open_rw(void) {
    barrier();
    /* It's a good time to verify if everything is fine */
    p_ed_pcfi_cpu(1);
-   p_tasks_read_lock(&p_flags);
-   p_ed_validate_current();
-   p_tasks_read_unlock(&p_flags);
+   p_ed_find_validate_current();
 }
 
 static inline void p_lkrg_close_rw(void) {
@@ -626,9 +620,9 @@ static inline void p_syscall_set_arg2(struct pt_regs *p_regs, unsigned long p_va
 static inline int p_set_memory_rw(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return P_SYM(p_set_memory_rw)(p_addr, p_numpages);
+   return P_SYM_CALL(p_set_memory_rw, p_addr, p_numpages);
 #else
-   return P_SYM(p_change_memory_common)(p_addr, p_numpages,
+   return P_SYM_CALL(p_change_memory_common, p_addr, p_numpages,
                                         __pgprot(0),
                                         __pgprot(L_PTE_RDONLY));
 #endif
@@ -637,18 +631,15 @@ static inline int p_set_memory_rw(unsigned long p_addr, int p_numpages) {
 static inline int p_set_memory_ro(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return P_SYM(p_set_memory_ro)(p_addr, p_numpages);
+   return P_SYM_CALL(p_set_memory_ro, p_addr, p_numpages);
 #else
-   return P_SYM(p_change_memory_common)(p_addr, p_numpages,
+   return P_SYM_CALL(p_change_memory_common, p_addr, p_numpages,
                                         __pgprot(L_PTE_RDONLY),
                                         __pgprot(0));
 #endif
 }
 
 static inline void p_lkrg_open_rw(void) {
-
-   unsigned long p_flags;
-
    mutex_lock(&p_ro_page_mutex);
 
    preempt_disable();
@@ -657,9 +648,7 @@ static inline void p_lkrg_open_rw(void) {
    barrier();
    /* It's a good time to verify if everything is fine */
    p_ed_pcfi_cpu(1);
-   p_tasks_read_lock(&p_flags);
-   p_ed_validate_current();
-   p_tasks_read_unlock(&p_flags);
+   p_ed_find_validate_current();
 }
 
 static inline void p_lkrg_close_rw(void) {
@@ -766,9 +755,9 @@ static inline void p_syscall_set_arg2(struct pt_regs *p_regs, unsigned long p_va
 static inline int p_set_memory_rw(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return P_SYM(p_set_memory_rw)(p_addr, p_numpages);
+   return P_SYM_CALL(p_set_memory_rw, p_addr, p_numpages);
 #else
-   return P_SYM(p_change_memory_common)(p_addr, p_numpages,
+   return P_SYM_CALL(p_change_memory_common, p_addr, p_numpages,
                                         __pgprot(PTE_WRITE),
                                         __pgprot(PTE_RDONLY));
 #endif
@@ -777,9 +766,9 @@ static inline int p_set_memory_rw(unsigned long p_addr, int p_numpages) {
 static inline int p_set_memory_ro(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return P_SYM(p_set_memory_ro)(p_addr, p_numpages);
+   return P_SYM_CALL(p_set_memory_ro, p_addr, p_numpages);
 #else
-   return P_SYM(p_change_memory_common)(p_addr, p_numpages,
+   return P_SYM_CALL(p_change_memory_common, p_addr, p_numpages,
                                         __pgprot(PTE_RDONLY),
                                         __pgprot(PTE_WRITE));
 #endif
@@ -788,9 +777,9 @@ static inline int p_set_memory_ro(unsigned long p_addr, int p_numpages) {
 static inline int p_set_memory_np(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return P_SYM(p_set_memory_valid)(p_addr, p_numpages, 0);
+   return P_SYM_CALL(p_set_memory_valid, p_addr, p_numpages, 0);
 #else
-   return P_SYM(p_change_memory_common)(p_addr, p_numpages,
+   return P_SYM_CALL(p_change_memory_common, p_addr, p_numpages,
                                         __pgprot(0),
                                         __pgprot(PTE_VALID));
 #endif
@@ -799,18 +788,15 @@ static inline int p_set_memory_np(unsigned long p_addr, int p_numpages) {
 static inline int p_set_memory_p(unsigned long p_addr, int p_numpages) {
 
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
-   return P_SYM(p_set_memory_valid)(p_addr, p_numpages, 1);
+   return P_SYM_CALL(p_set_memory_valid, p_addr, p_numpages, 1);
 #else
-   return P_SYM(p_change_memory_common)(p_addr, p_numpages,
+   return P_SYM_CALL(p_change_memory_common, p_addr, p_numpages,
                                         __pgprot(PTE_VALID),
                                         __pgprot(0));
 #endif
 }
 
 static inline void p_lkrg_open_rw(void) {
-
-   unsigned long p_flags;
-
    mutex_lock(&p_ro_page_mutex);
 
    preempt_disable();
@@ -819,9 +805,7 @@ static inline void p_lkrg_open_rw(void) {
    barrier();
    /* It's a good time to verify if everything is fine */
    p_ed_pcfi_cpu(1);
-   p_tasks_read_lock(&p_flags);
-   p_ed_validate_current();
-   p_tasks_read_unlock(&p_flags);
+   p_ed_find_validate_current();
 }
 
 static inline void p_lkrg_close_rw(void) {

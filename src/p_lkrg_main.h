@@ -18,7 +18,7 @@
 #ifndef P_LKRG_MAIN_H
 #define P_LKRG_MAIN_H
 
-#define P_LKRG_UNHIDE
+#define LKRG_WITH_HIDE
 #define P_BOOT_DISABLE_LKRG "nolkrg"
 
 #include <linux/kernel.h>
@@ -49,7 +49,6 @@
 #include <linux/namei.h>
 #include <linux/dcache.h>
 #include <linux/limits.h>
-#include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/rbtree.h>
 
@@ -66,6 +65,12 @@
 #include <linux/ftrace.h>
 
 #include <linux/preempt.h>
+
+#include <linux/timer.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,15,0)
+#define del_timer_sync(x) timer_delete_sync(x)
+#endif
+
 #ifndef RHEL_RELEASE_VERSION
 #define RHEL_RELEASE_VERSION(a, b) (((a) << 8) + (b))
 #endif
@@ -105,6 +110,8 @@ static inline unsigned long get_random_long(void) {
 #include <linux/sched/task_stack.h>
 #endif
 
+#include "modules/database/JUMP_LABEL/p_arch_jump_label_transform_apply/p_arch_jump_label_transform_apply.h"
+
 /*
  * Define kmem_cache_create() flags:
  *  - LKRG has used to leverage SLAB_HWCACHE_ALIGN but memory overhead
@@ -127,9 +134,6 @@ static inline unsigned long get_random_long(void) {
  * so you need to experiment.
  */
 //#define P_KERNEL_AGGRESSIVE_INLINING 1
-
-//#define p_lkrg_read_only __attribute__((__section__(".data..p_lkrg_read_only"),aligned(PAGE_SIZE)))
-#define __p_lkrg_read_only __attribute__((__section__(".p_lkrg_read_only")))
 
 #if defined(CONFIG_X86_64) || defined(CONFIG_ARM64)
  #define P_LKRG_MARKER1 0x3369705f6d616441
@@ -195,10 +199,7 @@ typedef struct _p_lkrg_global_symbols_structure {
 #if defined(P_KERNEL_AGGRESSIVE_INLINING)
    int (*p_set_memory_ro)(unsigned long addr, int numpages);
    int (*p_set_memory_rw)(unsigned long addr, int numpages);
- #if defined(CONFIG_X86)
-   ;
-//   int (*p_set_memory_np)(unsigned long addr, int numpages);
- #elif defined(CONFIG_ARM64)
+ #if defined(CONFIG_ARM64)
    int (*p_set_memory_valid)(unsigned long addr, int numpages, int enable);
  #endif
 #else
@@ -226,14 +227,19 @@ typedef struct _p_lkrg_global_symbols_structure {
 #endif
 #endif
    int (*p_core_kernel_text)(unsigned long p_addr);
-   pmd_t *(*p_mm_find_pmd)(struct mm_struct *mm, unsigned long address);
    struct mutex *p_jump_label_mutex;
    struct mutex *p_text_mutex;
 #ifdef CONFIG_TRACEPOINTS
    struct mutex *p_tracepoints_mutex;
 #endif
-   struct text_poke_loc **p_tp_vec;
+#ifdef P_LKRG_CI_ARCH_JUMP_LABEL_TRANSFORM_APPLY_H
+#ifdef TEXT_POKE_MAX_OPCODE_SIZE
+   struct p_text_poke_array *p_text_poke_array;
+#else
+   p_text_poke_loc *p_tp_vec;
    int *p_tp_vec_nr;
+#endif
+#endif
 #if defined(CONFIG_DYNAMIC_DEBUG)
    struct list_head *p_ddebug_tables;
    struct mutex *p_ddebug_lock;
@@ -254,7 +260,8 @@ typedef struct _p_lkrg_global_symbols_structure {
 #endif
    struct module* (*p_find_module)(const char *name);
    struct mutex *p_module_mutex;
-   int (*p_kallsyms_on_each_symbol)(int (*)(void *, const char *, struct module *, unsigned long), void *);
+   /* We use old kernels' prototype.  Newer have no "struct module *" here. */
+   int (*p_kallsyms_on_each_symbol)(int (*fn)(void *, const char *, struct module *, unsigned long), void *data);
 #if defined(CONFIG_FUNCTION_TRACER)
    struct ftrace_rec_iter *(*p_ftrace_rec_iter_start)(void);
    struct ftrace_rec_iter *(*p_ftrace_rec_iter_next)(struct ftrace_rec_iter *iter);
@@ -270,8 +277,8 @@ typedef struct _p_lkrg_global_symbols_structure {
 } p_lkrg_global_syms;
 
 #ifdef P_LKRG_UNEXPORTED_MODULE_ADDRESS
-#define LKRG_P_MODULE_ADDRESS(p_addr)      P_SYM(p___module_address)(p_addr)
-#define LKRG_P_MODULE_TEXT_ADDRESS(p_addr) P_SYM(p___module_text_address)(p_addr)
+#define LKRG_P_MODULE_ADDRESS(p_addr)      P_SYM_CALL(p___module_address, p_addr)
+#define LKRG_P_MODULE_TEXT_ADDRESS(p_addr) P_SYM_CALL(p___module_text_address, p_addr)
 #else
 #define LKRG_P_MODULE_ADDRESS(p_addr)      __module_address(p_addr)
 #define LKRG_P_MODULE_TEXT_ADDRESS(p_addr) __module_text_address(p_addr)
@@ -314,8 +321,128 @@ extern p_ro_page p_ro;
 #define P_CTRL(p_field) p_ro.p_lkrg_global_ctrl.ctrl.p_field
 #define P_CTRL_ADDR &p_ro.p_lkrg_global_ctrl
 
+#if defined(CONFIG_X86_KERNEL_IBT) || defined(CONFIG_CFI_CLANG)
+
+/*
+ * When Intel CET IBT is in use, we can't call non-exported kernel functions
+ * indirectly via pointers because there's generally no ENDBR64 instruction
+ * at their start.  However, when CET SS is not in use, like it currently is
+ * not by the kernel, we can bypass IBT by using RET as our indirect branch
+ * instruction (RET is exempt from IBT and is assumed to be protected by SS).
+ * We cannot use the NOTRACK prefix for this purpose because the kernel does
+ * not enable its support in the CPU, but this wouldn't make much difference.
+ *
+ * We use macros to generate wrapper functions for making CET IBT compatible
+ * indirect calls via PUSH/RET, one wrapper function per function pointer.
+ *
+ * With gcc, we rely on these functions having no prologue/epilogue, but having
+ * a return instruction or a branch to a return thunk.  __attribute__ ((naked))
+ * would more reliably avoid prologue/epilogue, but then it'd be our job to
+ * invoke the right return thunk for a given build.
+ *
+ * It is important to prevent inlining and other interprocedural optimizations
+ * at least because the indirect function call isn't exposed to the compiler,
+ * so the compiler wouldn't know it may clobber registers.  Having this wrapper
+ * function intact and called as a whole without analysis of its contents tells
+ * the compiler the same thing - that an arbitrary opaque function was called.
+ *
+ * __attribute__ ((noipa)) isn't recognized by older compilers, which is a
+ * problem if the kernel is nevertheless recent enough to be built with IBT
+ * support.  In testing, noinline along with noclone wasn't good enough.  We
+ * could improve upon this by having these functions in their own translation
+ * unit, ideally coming from an assembly rather than C source file.
+ *
+ * With clang not supporting __attribute__ ((noipa)), we use a combination of
+ * attributes including __attribute__ ((naked)), which means that for CET IBT
+ * (unlike solely clang software CFI) we use an explicit return instruction,
+ * which unfortunately produces this sort of objtool warnings:
+ * vmlinux.o: warning: objtool: call_p_kallsyms_lookup_name+0xa: 'naked' return found in MITIGATION_RETHUNK build
+ */
+
+#ifdef CONFIG_X86_64
+ #ifdef __clang__
+  #define GENERATE_CALL_FUNC_ATTR __attribute__ ((noduplicate)) __attribute__ ((naked)) __attribute__ ((optnone))
+  #ifdef CONFIG_X86_KERNEL_IBT
+   #define GENERATE_CALL_FUNC_ASM "pushq %0\n\tret"
+  #else
+   #define GENERATE_CALL_FUNC_ASM "jmpq *%0"
+  #endif
+ #else /* gcc */
+  #define GENERATE_CALL_FUNC_ATTR __attribute__ ((noipa))
+  #define GENERATE_CALL_FUNC_ASM "pushq %0"
+ #endif
+#else
+#error "CONFIG_X86_KERNEL_IBT and/or CONFIG_CFI_CLANG not yet supported on this architecture"
+#endif
+
+#define GENERATE_CALL_FUNC(type, name, ...) \
+   notrace noinline GENERATE_CALL_FUNC_ATTR type call_##name(__VA_ARGS__) { \
+      __asm__ __volatile__ (GENERATE_CALL_FUNC_ASM :: "m" (P_SYM(name))); \
+   } \
+   STACK_FRAME_NON_STANDARD(call_##name);
+
+#define GENERATE_CALL_FUNC_PROTO(type, name, ...) \
+   extern type call_##name(__VA_ARGS__);
+
+GENERATE_CALL_FUNC_PROTO(unsigned long, p_kallsyms_lookup_name, const char *name)
+GENERATE_CALL_FUNC_PROTO(int, p_freeze_processes, void)
+GENERATE_CALL_FUNC_PROTO(void, p_thaw_processes, void)
+#if !defined(CONFIG_ARM64)
+ GENERATE_CALL_FUNC_PROTO(void, p_flush_tlb_all, void)
+#endif
+#if defined(P_KERNEL_AGGRESSIVE_INLINING)
+ GENERATE_CALL_FUNC_PROTO(int, p_set_memory_ro, unsigned long addr, int numpages)
+ GENERATE_CALL_FUNC_PROTO(int, p_set_memory_rw, unsigned long addr, int numpages)
+ #if defined(CONFIG_ARM64)
+   GENERATE_CALL_FUNC_PROTO(int, p_set_memory_valid, unsigned long addr, int numpages, int enable)
+ #endif
+#else
+ #if defined(CONFIG_X86)
+  GENERATE_CALL_FUNC_PROTO(int, p_change_page_attr_set_clr, unsigned long *addr, int numpages,
+     pgprot_t mask_set, pgprot_t mask_clr, int force_split, int in_flag, struct page **pages)
+ #elif defined(CONFIG_ARM) || defined(CONFIG_ARM64)
+  GENERATE_CALL_FUNC_PROTO(int, p_change_memory_common, unsigned long addr, int numpages,
+     pgprot_t set_mask, pgprot_t clear_mask)
+ #endif
+#endif
+GENERATE_CALL_FUNC_PROTO(int, p___kernel_text_address, unsigned long p_addr)
+GENERATE_CALL_FUNC_PROTO(int, p_core_kernel_text, unsigned long p_addr)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0) && LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0) && !defined(mod_mem_type_is_init)
+ GENERATE_CALL_FUNC_PROTO(int, p_ddebug_remove_module, const char *p_name)
+#endif
+#if defined(CONFIG_X86)
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,8,0)
+  GENERATE_CALL_FUNC_PROTO(void, p_native_write_cr4, unsigned long p_val)
+ #endif
+#endif
+#ifdef P_LKRG_UNEXPORTED_MODULE_ADDRESS
+ GENERATE_CALL_FUNC_PROTO(struct module *, p___module_address, unsigned long p_val)
+ GENERATE_CALL_FUNC_PROTO(struct module *, p___module_text_address, unsigned long p_val)
+#endif
+GENERATE_CALL_FUNC_PROTO(struct module *, p_find_module, const char *name)
+GENERATE_CALL_FUNC_PROTO(int, p_kallsyms_on_each_symbol,
+   int (*fn)(void *, const char *, struct module *, unsigned long), void *data)
+#if defined(CONFIG_FUNCTION_TRACER)
+ GENERATE_CALL_FUNC_PROTO(struct ftrace_rec_iter *, p_ftrace_rec_iter_start, void)
+ GENERATE_CALL_FUNC_PROTO(struct ftrace_rec_iter *, p_ftrace_rec_iter_next, struct ftrace_rec_iter *iter)
+ GENERATE_CALL_FUNC_PROTO(struct dyn_ftrace *, p_ftrace_rec_iter_record, struct ftrace_rec_iter *iter)
+#endif
+#if defined(CONFIG_OPTPROBES)
+ GENERATE_CALL_FUNC_PROTO(void, p_wait_for_kprobe_optimizer, void)
+#endif
+
+#define P_SYM_CALL(name, ...) \
+   call_##name(__VA_ARGS__)
+
+#else
+
+#define P_SYM_CALL(name, ...) \
+   P_SYM(name)(__VA_ARGS__)
+
+#endif
+
 #define P_SYM_INIT(sym) \
-   if (!(P_SYM(p_ ## sym) = (typeof(P_SYM(p_ ## sym)))P_SYM(p_kallsyms_lookup_name)(#sym))) { \
+   if (!(P_SYM(p_ ## sym) = (typeof(P_SYM(p_ ## sym)))P_SYM_CALL(p_kallsyms_lookup_name, #sym))) { \
       p_print_log(P_LOG_FATAL, "Can't find '" #sym "'"); \
       goto p_sym_error; \
    }
@@ -339,24 +466,19 @@ static inline void p_lkrg_counter_lock_init(p_lkrg_counter_lock *p_arg) {
    smp_mb();
 }
 
-static inline unsigned long p_lkrg_counter_lock_trylock(p_lkrg_counter_lock *p_arg, unsigned long *p_flags) {
+static inline unsigned long p_lkrg_counter_lock_trylock(p_lkrg_counter_lock *p_arg) {
 
-   local_irq_save(*p_flags);
-   if (!spin_trylock(&p_arg->p_lock)) {
-      local_irq_restore(*p_flags);
-      return 0;
-   }
-   return 1;
+   return spin_trylock(&p_arg->p_lock);
 }
 
-static inline void p_lkrg_counter_lock_lock(p_lkrg_counter_lock *p_arg, unsigned long *p_flags) {
+static inline void p_lkrg_counter_lock_lock(p_lkrg_counter_lock *p_arg) {
 
-   spin_lock_irqsave(&p_arg->p_lock, *p_flags);
+   spin_lock(&p_arg->p_lock);
 }
 
-static inline void p_lkrg_counter_lock_unlock(p_lkrg_counter_lock *p_arg, unsigned long *p_flags) {
+static inline void p_lkrg_counter_lock_unlock(p_lkrg_counter_lock *p_arg) {
 
-   spin_unlock_irqrestore(&p_arg->p_lock, *p_flags);
+   spin_unlock(&p_arg->p_lock);
 }
 
 static inline void p_lkrg_counter_lock_val_inc(p_lkrg_counter_lock *p_arg) {
@@ -375,7 +497,7 @@ static inline void p_lkrg_counter_lock_val_dec(p_lkrg_counter_lock *p_arg) {
 
 static inline int p_lkrg_counter_lock_val_read(p_lkrg_counter_lock *p_arg) {
 
-   register int p_ret;
+   int p_ret;
 
    smp_mb();
    p_ret = atomic_read(&p_arg->p_counter);

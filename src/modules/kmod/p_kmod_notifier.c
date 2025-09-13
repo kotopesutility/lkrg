@@ -17,7 +17,6 @@
 
 
 static int p_module_event_notifier(struct notifier_block *p_this, unsigned long p_event, void *p_kmod);
-static void p_module_notifier_wrapper(unsigned long p_event, struct module *p_kmod);
 
 DEFINE_MUTEX(p_module_activity);
 struct module *p_module_activity_ptr;
@@ -49,6 +48,13 @@ static void p_module_notifier_wrapper(unsigned long p_event, struct module *p_km
    return;
 }
 
+#if P_OVL_OVERRIDE_SYNC_MODE
+static notrace void p_verify_module_live(struct module *p_mod);
+static notrace void p_verify_module_going(struct module *p_mod);
+#else
+#define p_verify_module_live(p_mod)
+#define p_verify_module_going(p_mod)
+#endif
 
 /*
  * This function is called when module is load/unloaded
@@ -101,10 +107,12 @@ static int p_module_event_notifier(struct notifier_block *p_this, unsigned long 
 //   if (p_tmp->state == MODULE_STATE_GOING) { <- Linux kernel bug - might not update state value :(
    if (p_event == MODULE_STATE_GOING) {
 
+      read_lock(&p_config_lock);
       p_read_cpu_lock();
       on_each_cpu(p_dump_CPU_metadata,p_db.p_CPU_metadata_array,true);
       p_db.p_CPU_metadata_hashes = hash_from_CPU_data(p_db.p_CPU_metadata_array);
       p_read_cpu_unlock();
+      read_unlock(&p_config_lock);
 
       /*
        * Now recalculate modules information in database!
@@ -140,7 +148,7 @@ static int p_module_event_notifier(struct notifier_block *p_this, unsigned long 
 
       /* OK, now recalculate hashes again! */
       while(p_kmod_hash(&p_db.p_module_list_nr,&p_db.p_module_list_array,
-                        &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 0x2) != P_LKRG_SUCCESS)
+                        &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 2) != P_LKRG_SUCCESS)
          schedule();
 
       /* Update global module list/kobj hash */
@@ -173,10 +181,12 @@ static int p_module_event_notifier(struct notifier_block *p_this, unsigned long 
 //      if (p_tmp->state == MODULE_STATE_LIVE) { <- Linux kernel bug - might not update state value :(
       if (p_event == MODULE_STATE_LIVE) {
 
+         read_lock(&p_config_lock);
          p_read_cpu_lock();
          on_each_cpu(p_dump_CPU_metadata,p_db.p_CPU_metadata_array,true);
          p_db.p_CPU_metadata_hashes = hash_from_CPU_data(p_db.p_CPU_metadata_array);
          p_read_cpu_unlock();
+         read_unlock(&p_config_lock);
 
          /*
           * Now recalculate modules information in database! Since blocking module is disabled
@@ -207,7 +217,7 @@ static int p_module_event_notifier(struct notifier_block *p_this, unsigned long 
 
          /* OK, now recalculate hashes again! */
          while(p_kmod_hash(&p_db.p_module_list_nr,&p_db.p_module_list_array,
-                           &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 0x2) != P_LKRG_SUCCESS)
+                           &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 2) != P_LKRG_SUCCESS)
             schedule();
 
          /* Update global module list/kobj hash */
@@ -247,10 +257,10 @@ p_module_event_notifier_activity_out:
    return NOTIFY_DONE;
 }
 
-void p_verify_module_live(struct module *p_mod) {
-
 #if P_OVL_OVERRIDE_SYNC_MODE
-   if (p_ovl_override_sync_kretprobe_state) {
+static notrace void p_verify_module_live(struct module *p_mod) {
+
+   if (p_ovl_override_sync_probe.state != LKRG_PROBE_OFF) {
       /* We do not need to do anything for now */
       return;
    }
@@ -279,13 +289,11 @@ void p_verify_module_live(struct module *p_mod) {
       P_CTRL(p_kint_validate) = p_tmp_val;
       p_lkrg_close_rw();
    }
-#endif
 }
 
-void p_verify_module_going(struct module *p_mod) {
+static notrace void p_verify_module_going(struct module *p_mod) {
 
-#if P_OVL_OVERRIDE_SYNC_MODE
-   if (!p_ovl_override_sync_kretprobe_state) {
+   if (p_ovl_override_sync_probe.state == LKRG_PROBE_OFF) {
       /* We do not need to do anything for now */
       return;
    }
@@ -310,9 +318,8 @@ void p_verify_module_going(struct module *p_mod) {
       P_CTRL(p_kint_validate) = p_tmp_val;
       p_lkrg_close_rw();
    }
-#endif
-
 }
+#endif
 
 void p_register_module_notifier(void) {
 
@@ -335,9 +342,5 @@ void p_deregister_module_notifier(void) {
    if (p_db.p_module_kobj_array) {
       p_kzfree(p_db.p_module_kobj_array);
       p_db.p_module_kobj_array = NULL;
-   }
-   if (p_db.p_jump_label.p_mod_mask) {
-      kfree(p_db.p_jump_label.p_mod_mask);
-      p_db.p_jump_label.p_mod_mask = NULL;
    }
 }

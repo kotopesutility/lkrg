@@ -29,14 +29,7 @@
 
 #if defined(P_LKRG_FTRACE_MODIFY_ALL_CODE_H)
 
-char p_ftrace_modify_all_code_kretprobe_state = 0;
-
-static struct kretprobe p_ftrace_modify_all_code_kretprobe = {
-    .kp.symbol_name = "ftrace_modify_all_code",
-    .handler = p_ftrace_modify_all_code_ret,
-    .entry_handler = p_ftrace_modify_all_code_entry,
-    .data_size = sizeof(struct p_ftrace_modify_all_code_data),
-};
+#include "../../../exploit_detection/syscalls/p_install.h"
 
 /*
  * We do not need to protect this variables since ftrace_modify_all_code() is executed
@@ -53,7 +46,7 @@ unsigned int p_ftrace_tmp_mod;
  * static int ftrace_modify_all_code(unsigned long pc, unsigned long old,
  *                                   unsigned long new, bool validate)
  */
-notrace int p_ftrace_modify_all_code_entry(struct kretprobe_instance *p_ri, struct pt_regs *p_regs) {
+static notrace int p_ftrace_modify_all_code_entry(struct kretprobe_instance *p_ri, struct pt_regs *p_regs) {
 
    struct ftrace_rec_iter *p_iter;
    struct dyn_ftrace *p_rec;
@@ -67,7 +60,7 @@ notrace int p_ftrace_modify_all_code_entry(struct kretprobe_instance *p_ri, stru
    spin_lock(&p_db_lock);
    p_ftrace_tmp_mod = p_ftrace_tmp_text = 0;
    /* text_mutex lock should do the sync work here... */
-   bitmap_zero(p_db.p_jump_label.p_mod_mask, p_db.p_module_list_nr);
+   /* ...including against concurrent use of p_stale fields by JUMP_LABEL? */
 
    if (p_command & FTRACE_UPDATE_TRACE_FUNC ||
        p_command & FTRACE_START_FUNC_RET ||
@@ -75,10 +68,10 @@ notrace int p_ftrace_modify_all_code_entry(struct kretprobe_instance *p_ri, stru
       p_ftrace_tmp_text++;
    }
 
-   p_for_ftrace_rec_iter(p_iter) {
-      p_rec = P_SYM(p_ftrace_rec_iter_record)(p_iter);
+   for (p_iter = P_SYM_CALL(p_ftrace_rec_iter_start); p_iter; p_iter = P_SYM_CALL(p_ftrace_rec_iter_next, p_iter)) {
+      p_rec = P_SYM_CALL(p_ftrace_rec_iter_record, p_iter);
 
-      if (P_SYM(p_core_kernel_text)(p_rec->ip)) {
+      if (P_SYM_CALL(p_core_kernel_text, p_rec->ip)) {
 
          p_ftrace_tmp_text++;
 
@@ -87,13 +80,14 @@ notrace int p_ftrace_modify_all_code_entry(struct kretprobe_instance *p_ri, stru
             if (p_db.p_module_list_array[p_tmp].p_mod == p_module) {
                /*
                 * OK, we found this module on our internal tracking list.
-                * Set bit in bitmask
                 */
-               set_bit(p_tmp, p_db.p_jump_label.p_mod_mask);
-               p_ftrace_tmp_mod++;
-               break;
-            }
+               p_db.p_module_list_array[p_tmp].p_stale = true;
+               if (p_ftrace_tmp_mod) /* the rest of p_stale fields already initialized */
+                  break;
+            } else if (!p_ftrace_tmp_mod) /* need to initialize them all */
+               p_db.p_module_list_array[p_tmp].p_stale = false;
          }
+         p_ftrace_tmp_mod++;
 
       } else {
          /*
@@ -109,7 +103,7 @@ notrace int p_ftrace_modify_all_code_entry(struct kretprobe_instance *p_ri, stru
 }
 
 
-notrace int p_ftrace_modify_all_code_ret(struct kretprobe_instance *ri, struct pt_regs *p_regs) {
+static notrace int p_ftrace_modify_all_code_ret(struct kretprobe_instance *ri, struct pt_regs *p_regs) {
 
    unsigned int p_tmp,p_tmp2;
    unsigned char p_flag = 0;
@@ -141,7 +135,7 @@ notrace int p_ftrace_modify_all_code_ret(struct kretprobe_instance *ri, struct p
    if (p_ftrace_tmp_mod) {
 
       for (p_tmp = 0; p_tmp < p_db.p_module_list_nr; p_tmp++) {
-         if (test_bit(p_tmp, p_db.p_jump_label.p_mod_mask)) {
+         if (p_db.p_module_list_array[p_tmp].p_stale) {
 
             /*
              * OK, we found this module on our internal tracking list.
@@ -168,6 +162,7 @@ notrace int p_ftrace_modify_all_code_ret(struct kretprobe_instance *ri, struct p
             /*
              * Because we update module's .text section hash we need to update KOBJs as well.
              */
+            p_flag = 0;
             for (p_tmp2 = 0; p_tmp2 < p_db.p_module_kobj_nr; p_tmp2++) {
                if (p_db.p_module_kobj_array[p_tmp2].p_mod == p_module) {
                   p_db.p_module_kobj_array[p_tmp2].p_mod_core_text_hash =
@@ -203,48 +198,15 @@ notrace int p_ftrace_modify_all_code_ret(struct kretprobe_instance *ri, struct p
 }
 
 
-int p_install_ftrace_modify_all_code_hook(void) {
+static struct lkrg_probe p_ftrace_modify_all_code_probe = {
+  .type = LKRG_KRETPROBE,
+  .krp = {
+    .kp.symbol_name = "ftrace_modify_all_code",
+    .handler = p_ftrace_modify_all_code_ret,
+    .entry_handler = p_ftrace_modify_all_code_entry,
+  }
+};
 
-   int p_tmp;
-
-   P_SYM_INIT(ftrace_lock)
-   P_SYM_INIT(ftrace_rec_iter_start)
-   P_SYM_INIT(ftrace_rec_iter_next)
-   P_SYM_INIT(ftrace_rec_iter_record)
-
-   p_ftrace_modify_all_code_kretprobe.maxactive = p_get_kprobe_maxactive();
-   if ( (p_tmp = register_kretprobe(&p_ftrace_modify_all_code_kretprobe)) != 0) {
-      p_print_log(P_LOG_FATAL, "[kretprobe] register_kretprobe() for <%s> failed! [err=%d]",
-                  p_ftrace_modify_all_code_kretprobe.kp.symbol_name,
-                  p_tmp);
-      return P_LKRG_GENERAL_ERROR;
-   }
-   p_print_log(P_LOG_WATCH, "Planted [kretprobe] <%s> at: 0x%lx",
-               p_ftrace_modify_all_code_kretprobe.kp.symbol_name,
-               (unsigned long)p_ftrace_modify_all_code_kretprobe.kp.addr);
-   p_ftrace_modify_all_code_kretprobe_state = 1;
-
-   return P_LKRG_SUCCESS;
-
-p_sym_error:
-   return P_LKRG_GENERAL_ERROR;
-}
-
-
-void p_uninstall_ftrace_modify_all_code_hook(void) {
-
-   if (!p_ftrace_modify_all_code_kretprobe_state) {
-      p_print_log(P_LOG_WATCH, "[kretprobe] <%s> at 0x%lx is NOT installed",
-                  p_ftrace_modify_all_code_kretprobe.kp.symbol_name,
-                  (unsigned long)p_ftrace_modify_all_code_kretprobe.kp.addr);
-   } else {
-      unregister_kretprobe(&p_ftrace_modify_all_code_kretprobe);
-      p_print_log(P_LOG_WATCH, "Removing [kretprobe] <%s> at 0x%lx nmissed[%d]",
-                  p_ftrace_modify_all_code_kretprobe.kp.symbol_name,
-                  (unsigned long)p_ftrace_modify_all_code_kretprobe.kp.addr,
-                  p_ftrace_modify_all_code_kretprobe.nmissed);
-      p_ftrace_modify_all_code_kretprobe_state = 0;
-   }
-}
+GENERATE_INSTALL_FUNC(ftrace_modify_all_code)
 
 #endif

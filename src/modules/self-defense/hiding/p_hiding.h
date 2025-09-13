@@ -18,6 +18,8 @@
 #ifndef P_LKRG_HIDING_MODULE_H
 #define P_LKRG_HIDING_MODULE_H
 
+#ifdef LKRG_WITH_HIDE
+
 #define P_HIDE_FROM_MODULE_LIST(p_arg)                                     \
 do {                                                                       \
    p_debug_log(P_LOG_DEBUG, "Hiding module [%s | 0x%lx]",                  \
@@ -57,7 +59,7 @@ do {                                                                       \
 } while(0)
 #endif
 
-#ifdef P_LKRG_UNHIDE   // (P_SYM(p_find_me), P_SYM(p_modules))
+#ifdef LKRG_WITH_HIDE   // (P_SYM(p_find_me), P_SYM(p_modules))
 
 #define P_UNHIDE_FROM_MODULE_LIST(x, y)                                    \
 do {                                                                       \
@@ -66,6 +68,14 @@ do {                                                                       \
    list_add_rcu(&x->list, y);                                              \
 } while(0)
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,17,0)
+/* Moved from include/linux/module.h to kernel/module/internal.h */
+struct module_use {
+   struct list_head source_list;
+   struct list_head target_list;
+   struct module *source, *target;
+};
+#endif
 
 #define P_UNHIDE_FROM_KOBJ(p_mod,p_kset,p_ktype)                           \
 do {                                                                       \
@@ -137,8 +147,8 @@ do {                                                                       \
 
 
 void p_hide_itself(void);
-#ifdef P_LKRG_UNHIDE
 void p_unhide_itself(void);
+
 #endif
 
 #endif

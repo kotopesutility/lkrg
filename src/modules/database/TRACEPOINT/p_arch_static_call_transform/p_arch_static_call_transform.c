@@ -20,17 +20,9 @@
  */
 
 #include "../../../../p_lkrg_main.h"
+#include "../../../exploit_detection/syscalls/p_install.h"
 
 #if defined(P_LKRG_CI_ARCH_STATIC_CALL_TRANSFORM_H)
-
-static char p_arch_static_call_transform_kretprobe_state = 0;
-
-static struct kretprobe p_arch_static_call_transform_kretprobe = {
-    .kp.symbol_name = "arch_static_call_transform",
-    .handler = p_arch_static_call_transform_ret,
-    .entry_handler = p_arch_static_call_transform_entry,
-    .data_size = sizeof(struct p_arch_static_call_transform_data),
-};
 
 static unsigned long p_tracepoint_tmp_text;
 static struct module *p_module1;
@@ -40,25 +32,24 @@ static unsigned int p_module2_idx;
 
 p_lkrg_counter_lock p_static_call_spinlock;
 
-notrace int p_arch_static_call_transform_entry(struct kretprobe_instance *p_ri, struct pt_regs *p_regs) {
+static notrace int p_arch_static_call_transform_entry(struct kretprobe_instance *p_ri, struct pt_regs *p_regs) {
 
    unsigned long p_site = p_regs_get_arg1(p_regs);
    unsigned long p_tramp = p_regs_get_arg2(p_regs);
    unsigned int p_tmp;
-   unsigned long p_flags;
 
    p_debug_kprobe_log(
           "p_arch_static_call_transform_entry: comm[%s] Pid:%d",current->comm,current->pid);
 
    do {
-      p_lkrg_counter_lock_lock(&p_static_call_spinlock, &p_flags);
+      p_lkrg_counter_lock_lock(&p_static_call_spinlock);
       if (!p_lkrg_counter_lock_val_read(&p_static_call_spinlock))
          break;
-      p_lkrg_counter_lock_unlock(&p_static_call_spinlock, &p_flags);
+      p_lkrg_counter_lock_unlock(&p_static_call_spinlock);
       cpu_relax();
    } while(1);
    p_lkrg_counter_lock_val_inc(&p_static_call_spinlock);
-   p_lkrg_counter_lock_unlock(&p_static_call_spinlock, &p_flags);
+   p_lkrg_counter_lock_unlock(&p_static_call_spinlock);
 
 
    p_module1_idx = p_module2_idx = p_tracepoint_tmp_text = 0;
@@ -70,7 +61,7 @@ notrace int p_arch_static_call_transform_entry(struct kretprobe_instance *p_ri, 
                   "[TRACEPOINT] New modification: code[0x%lx]!",
                   (unsigned long)p_tramp);
 
-      if (P_SYM(p_core_kernel_text)(p_tramp)) {
+      if (P_SYM_CALL(p_core_kernel_text, p_tramp)) {
 
          p_tracepoint_tmp_text++;
 
@@ -104,7 +95,7 @@ notrace int p_arch_static_call_transform_entry(struct kretprobe_instance *p_ri, 
                   "[TRACEPOINT] New modification: code[0x%lx]!",
                   (unsigned long)p_site);
 
-      if (P_SYM(p_core_kernel_text)(p_site)) {
+      if (P_SYM_CALL(p_core_kernel_text, p_site)) {
 
          p_tracepoint_tmp_text++;
 
@@ -137,7 +128,7 @@ notrace int p_arch_static_call_transform_entry(struct kretprobe_instance *p_ri, 
 }
 
 
-notrace int p_arch_static_call_transform_ret(struct kretprobe_instance *ri, struct pt_regs *p_regs) {
+static notrace int p_arch_static_call_transform_ret(struct kretprobe_instance *ri, struct pt_regs *p_regs) {
 
    unsigned int p_tmp;
    unsigned char p_flag = 0;
@@ -181,6 +172,7 @@ notrace int p_arch_static_call_transform_ret(struct kretprobe_instance *ri, stru
       /*
        * Because we update module's .text section hash we need to update KOBJs as well.
        */
+      p_flag = 0;
       for (p_tmp = 0; p_tmp < p_db.p_module_kobj_nr; p_tmp++) {
          if (p_db.p_module_kobj_array[p_tmp].p_mod == p_module1) {
             p_db.p_module_kobj_array[p_tmp].p_mod_core_text_hash =
@@ -229,6 +221,7 @@ notrace int p_arch_static_call_transform_ret(struct kretprobe_instance *ri, stru
       /*
        * Because we update module's .text section hash we need to update KOBJs as well.
        */
+      p_flag = 0;
       for (p_tmp = 0; p_tmp < p_db.p_module_kobj_nr; p_tmp++) {
          if (p_db.p_module_kobj_array[p_tmp].p_mod == p_module2) {
             p_db.p_module_kobj_array[p_tmp].p_mod_core_text_hash =
@@ -262,42 +255,15 @@ notrace int p_arch_static_call_transform_ret(struct kretprobe_instance *ri, stru
 }
 
 
-int p_install_arch_static_call_transform_hook(void) {
+static struct lkrg_probe p_arch_static_call_transform_probe = {
+  .type = LKRG_KRETPROBE,
+  .krp = {
+    .kp.symbol_name = "arch_static_call_transform",
+    .handler = p_arch_static_call_transform_ret,
+    .entry_handler = p_arch_static_call_transform_entry,
+  }
+};
 
-   int p_tmp;
-
-   p_lkrg_counter_lock_init(&p_static_call_spinlock);
-
-   p_arch_static_call_transform_kretprobe.maxactive = p_get_kprobe_maxactive();
-   if ( (p_tmp = register_kretprobe(&p_arch_static_call_transform_kretprobe)) != 0) {
-      p_print_log(P_LOG_FATAL, "[kretprobe] register_kretprobe() for <%s> failed! [err=%d]",
-                  p_arch_static_call_transform_kretprobe.kp.symbol_name,
-                  p_tmp);
-      return P_LKRG_GENERAL_ERROR;
-   }
-   p_print_log(P_LOG_WATCH, "Planted [kretprobe] <%s> at: 0x%lx",
-               p_arch_static_call_transform_kretprobe.kp.symbol_name,
-               (unsigned long)p_arch_static_call_transform_kretprobe.kp.addr);
-   p_arch_static_call_transform_kretprobe_state = 1;
-
-   return P_LKRG_SUCCESS;
-}
-
-
-void p_uninstall_arch_static_call_transform_hook(void) {
-
-   if (!p_arch_static_call_transform_kretprobe_state) {
-      p_print_log(P_LOG_WATCH, "[kretprobe] <%s> at 0x%lx is NOT installed",
-                  p_arch_static_call_transform_kretprobe.kp.symbol_name,
-                  (unsigned long)p_arch_static_call_transform_kretprobe.kp.addr);
-   } else {
-      unregister_kretprobe(&p_arch_static_call_transform_kretprobe);
-      p_print_log(P_LOG_WATCH, "Removing [kretprobe] <%s> at 0x%lx nmissed[%d]",
-                  p_arch_static_call_transform_kretprobe.kp.symbol_name,
-                  (unsigned long)p_arch_static_call_transform_kretprobe.kp.addr,
-                  p_arch_static_call_transform_kretprobe.nmissed);
-      p_arch_static_call_transform_kretprobe_state = 0;
-   }
-}
+GENERATE_INSTALL_FUNC(arch_static_call_transform)
 
 #endif

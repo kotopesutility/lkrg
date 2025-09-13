@@ -17,6 +17,8 @@
 
 #include "../../../p_lkrg_main.h"
 
+#ifdef LKRG_WITH_HIDE
+
 /*
 struct kobject            *p_find_kobj_parent;
 struct module_sect_attrs  *p_find_sect_attrs;
@@ -48,7 +50,7 @@ void p_hide_itself(void) {
 
    /* OK, now recalculate hashes again! */
    while(p_kmod_hash(&p_db.p_module_list_nr,&p_db.p_module_list_array,
-                     &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 0x2) != P_LKRG_SUCCESS)
+                     &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 2) != P_LKRG_SUCCESS)
       schedule();
 
    /* Update global module list/kobj hash */
@@ -65,7 +67,6 @@ void p_hide_itself(void) {
    mutex_unlock(P_SYM(p_module_mutex));
 }
 
-#ifdef P_LKRG_UNHIDE
 void p_unhide_itself(void) {
 
    struct module     *p_tmp_mod    = P_GLOBAL_TO_MODULE(P_SYM(p_modules));
@@ -88,7 +89,7 @@ void p_unhide_itself(void) {
 
    /* OK, now recalculate hashes again! */
    while(p_kmod_hash(&p_db.p_module_list_nr,&p_db.p_module_list_array,
-                     &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 0x2) != P_LKRG_SUCCESS)
+                     &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 2) != P_LKRG_SUCCESS)
       schedule();
 
    /* Update global module list/kobj hash */
@@ -105,4 +106,5 @@ p_unhide_itself_exit:
    /* Release the 'module_mutex' */
    mutex_unlock(P_SYM(p_module_mutex));
 }
+
 #endif

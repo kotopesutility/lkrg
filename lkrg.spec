@@ -4,7 +4,7 @@
 
 Summary: Linux Kernel Runtime Guard (LKRG)
 Name: lkrg
-Version: 0.9.9
+Version: 1.0.0
 Release: 1%{?dist}
 License: GPLv2
 URL: https://lkrg.org
@@ -36,7 +36,7 @@ Userspace tools to support Linux Kernel Runtime Guard (LKRG) remote logging.
 
 %build
 make %{?_smp_mflags} KERNEL=/usr/src/kernels/%kmod_headers_version
-make -C logger %{?_smp_mflags} CFLAGS='%optflags'
+make -C logger %{?_smp_mflags} CFLAGS='-fPIE %optflags' LDFLAGS='-s -fPIE -pie -Wl,-z,defs -Wl,-z,relro -Wl,-z,now %optflags'
 
 %install
 rm -rf %buildroot
@@ -85,6 +85,23 @@ fi
 %dir %attr(0750,lkrg-logger,lkrg-logger) /var/log/lkrg-logger
 
 %changelog
+* Tue Sep  2 2025 Solar Designer <solar@openwall.com> 1.0.0-1
+- Update to 1.0.0
+
+* Thu May 15 2025 Solar Designer <solar@openwall.com> 0.9.9-8
+- Update to latest git as of today (aa6f685005bb27eccb060ed552877ba5677012d4)
+
+* Fri May  2 2025 Solar Designer <solar@openwall.com> 0.9.9-7
+- Update to latest git as of today (1bde9e5489268d877c07fd7a5fd91085e69a4fb5)
+
+* Mon Feb  3 2025 Solar Designer <solar@openwall.com> 0.9.9-5
+- Add -fPIE to logger CFLAGS for consistency with -pie in LDFLAGS
+  (but no issues were seen on Rocky Linux 8 and 9 even without this change)
+
+* Fri Jan 31 2025 Solar Designer <solar@openwall.com> 0.9.9-4
+- Pass -s -pie -Wl,-z,defs -Wl,-z,relro -Wl,-z,now and optflags into LDFLAGS
+  when building the logger userspace binaries
+
 * Wed Oct 23 2024 Solar Designer <solar@openwall.com> 0.9.9-1
 - Update to 0.9.9
 

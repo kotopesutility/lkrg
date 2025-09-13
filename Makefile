@@ -5,7 +5,6 @@
 #  - Adam 'pi3' Zabrocki (http://pi3.com.pl)
 ##
 
-P_OUTPUT = output
 P_PWD ?= $(shell pwd)
 P_KVER ?= $(shell uname -r)
 P_BOOTUP_SCRIPT ?= scripts/bootup/lkrg-bootup.sh
@@ -48,7 +47,7 @@ $(TARGET)-objs += src/modules/ksyms/p_resolve_ksym.o \
                   src/modules/database/p_database.o \
                   src/modules/notifiers/p_notifiers.o \
                   src/modules/self-defense/hiding/p_hiding.o \
-                  src/modules/exploit_detection/p_rb_ed_trees/p_rb_ed_pids/p_rb_ed_pids_tree.o \
+                  src/modules/exploit_detection/ed_task_tree.o \
                   src/modules/exploit_detection/syscalls/p_install.o \
                   src/modules/exploit_detection/syscalls/exec/p_security_bprm_committing_creds/p_security_bprm_committing_creds.o \
                   src/modules/exploit_detection/syscalls/exec/p_security_bprm_committed_creds/p_security_bprm_committed_creds.o \
@@ -64,24 +63,12 @@ $(TARGET)-objs += src/modules/ksyms/p_resolve_ksym.o \
                   src/modules/exploit_detection/syscalls/p_sys_setregid/p_sys_setregid.o \
                   src/modules/exploit_detection/syscalls/p_sys_setresgid/p_sys_setresgid.o \
                   src/modules/exploit_detection/syscalls/p_sys_setfsgid/p_sys_setfsgid.o \
-                  src/modules/exploit_detection/syscalls/p_set_current_groups/p_set_current_groups.o \
                   src/modules/exploit_detection/syscalls/p_generic_permission/p_generic_permission.o \
                   src/modules/exploit_detection/syscalls/p_sel_write_enforce/p_sel_write_enforce.o \
                   src/modules/exploit_detection/syscalls/p_seccomp/p_seccomp.o \
                   src/modules/exploit_detection/syscalls/p_sys_unshare/p_sys_unshare.o \
                   src/modules/exploit_detection/syscalls/p_sys_setns/p_sys_setns.o \
-                  src/modules/exploit_detection/syscalls/caps/p_sys_capset/p_sys_capset.o \
-                  src/modules/exploit_detection/syscalls/caps/p_cap_task_prctl/p_cap_task_prctl.o \
-                  src/modules/exploit_detection/syscalls/keyring/p_key_change_session_keyring/p_key_change_session_keyring.o \
-                  src/modules/exploit_detection/syscalls/keyring/p_sys_add_key/p_sys_add_key.o \
-                  src/modules/exploit_detection/syscalls/keyring/p_sys_request_key/p_sys_request_key.o \
-                  src/modules/exploit_detection/syscalls/keyring/p_sys_keyctl/p_sys_keyctl.o \
                   src/modules/exploit_detection/syscalls/p_security_ptrace_access/p_security_ptrace_access.o \
-                  src/modules/exploit_detection/syscalls/compat/p_compat_sys_keyctl/p_compat_sys_keyctl.o \
-                  src/modules/exploit_detection/syscalls/compat/p_compat_sys_capset/p_compat_sys_capset.o \
-                  src/modules/exploit_detection/syscalls/compat/p_compat_sys_add_key/p_compat_sys_add_key.o \
-                  src/modules/exploit_detection/syscalls/compat/p_compat_sys_request_key/p_compat_sys_request_key.o \
-                  src/modules/exploit_detection/syscalls/__x32/p_x32_sys_keyctl/p_x32_sys_keyctl.o \
                   src/modules/exploit_detection/syscalls/override/p_override_creds/p_override_creds.o \
                   src/modules/exploit_detection/syscalls/override/p_revert_creds/p_revert_creds.o \
                   src/modules/exploit_detection/syscalls/override/overlayfs/p_ovl_override_sync/p_ovl_override_sync.o \
@@ -99,12 +86,12 @@ $(TARGET)-objs += src/modules/ksyms/p_resolve_ksym.o \
 all:
 #	$(MAKE) -C $(KERNEL) M=$(P_PWD) modules CONFIG_DEBUG_SECTION_MISMATCH=y
 	$(MAKE) -C $(KERNEL) M=$(P_PWD) modules
-	mkdir -p $(P_OUTPUT)
-	cp $(P_PWD)/$(TARGET).ko $(P_OUTPUT)
 
-install:
+install-module: all
 	$(MAKE) -C $(KERNEL) M=$(P_PWD) modules_install
-	depmod -a
+
+install: install-module
+	depmod $(KERNELRELEASE)
 	$(P_PWD)/$(P_BOOTUP_SCRIPT) install
 
 uninstall:
@@ -115,4 +102,5 @@ clean:
 	$(RM) Module.markers modules.order
 	$(RM) $(P_PWD)/src/modules/kmod/client/kmod/Module.markers
 	$(RM) $(P_PWD)/src/modules/kmod/client/kmod/modules.order
-	$(RM) -rf $(P_OUTPUT)
+
+.PHONY: clean uninstall install install-module all

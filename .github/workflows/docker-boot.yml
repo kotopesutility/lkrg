@@ -8,9 +8,9 @@ jobs:
             fail-fast: false
             matrix:
                 include:
-#                    - args: image=i386/ubuntu:bionic
-#                            qemu=qemu-system-i386
-#                      install: qemu-system-x86
+                    - args: image=i386/ubuntu:bionic
+                            qemu=qemu-system-i386
+                      install: qemu-system-x86
 
                     - args: image=arm64v8/ubuntu:jammy
                             platform=linux/arm64
@@ -58,8 +58,6 @@ jobs:
             - name: Check that boot-tests script finished successfully
               run: grep 'run-boot-tests.sh - SUCCESS' boot.log
             - name: Check that boot.log contains shutdown sequence
-              run: |
-                  grep 'sysrq: Power Off' boot.log
-                  grep 'reboot: Power down' boot.log
+              run: "grep 'reboot: Power down' boot.log"
 
 # vim: sw=4

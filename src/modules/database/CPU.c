@@ -57,37 +57,24 @@ void p_get_cpus(p_cpu_info *p_arg) {
    p_arg->present_CPUs = num_present_cpus();
    p_arg->active_CPUs = num_active_cpus();
 
-   p_arg->p_nr_cpu_ids = nr_cpu_ids;
-
    p_debug_log(P_LOG_DEBUG,
           "<p_get_cpus> online[%d] possible[%d] present[%d] active[%d] nr_cpu_ids[%d]",
           p_arg->online_CPUs,p_arg->possible_CPUs,p_arg->present_CPUs,p_arg->active_CPUs,
-          p_arg->p_nr_cpu_ids);
+          nr_cpu_ids);
 }
 
-int p_cmp_cpus(p_cpu_info *p_orig, p_cpu_info *p_current) {
-
-   int p_flag = 0;
+void p_cmp_cpus(p_cpu_info *p_orig, p_cpu_info *p_current) {
 
 #define P_CMP_CPU(which) \
-   if (p_orig->which ## _CPUs != p_current->which ## _CPUs) { \
+   if (unlikely(p_orig->which ## _CPUs != p_current->which ## _CPUs)) { \
       p_print_log(P_LOG_FAULT, "Number of " #which " CPUs changed unexpectedly (expected %u, actual %u)", \
          p_orig->which ## _CPUs, p_current->which ## _CPUs); \
-      p_flag++; \
    }
 
    P_CMP_CPU(online)
    P_CMP_CPU(possible)
    P_CMP_CPU(present)
    P_CMP_CPU(active)
-
-   if (p_orig->p_nr_cpu_ids != p_current->p_nr_cpu_ids) {
-      p_print_log(P_LOG_FAULT, "'nr_cpu_ids' changed unexpectedly (expected %u, actual %u)",
-         p_orig->p_nr_cpu_ids, p_current->p_nr_cpu_ids);
-      p_flag++;
-   }
-
-   return p_flag;
 }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,10,0)
@@ -146,7 +133,7 @@ static void p_cpu_rehash(const char *onoffline) {
 
    /* OK, now recalculate hashes again! */
    while(p_kmod_hash(&p_db.p_module_list_nr,&p_db.p_module_list_array,
-                     &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 0x2) != P_LKRG_SUCCESS)
+                     &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 2) != P_LKRG_SUCCESS)
       schedule();
 
    /* Update global module list/kobj hash */
@@ -168,6 +155,7 @@ int p_cpu_online_action(unsigned int p_cpu) {
 
    p_text_section_lock();
    spin_lock(&p_db_lock);
+   read_lock(&p_config_lock);
 
    smp_call_function_single(p_cpu,p_dump_CPU_metadata,p_db.p_CPU_metadata_array,true);
 
@@ -186,6 +174,7 @@ int p_cpu_online_action(unsigned int p_cpu) {
       p_cpu_rehash("online");
    }
 
+   read_unlock(&p_config_lock);
    /* God mode off ;) */
 //   spin_unlock_irqrestore(&p_db_lock,p_db_flags);
    spin_unlock(&p_db_lock);
@@ -200,6 +189,7 @@ int p_cpu_dead_action(unsigned int p_cpu) {
 
    p_text_section_lock();
    spin_lock(&p_db_lock);
+   read_lock(&p_config_lock);
 
    p_db.p_CPU_metadata_array[p_cpu].p_cpu_online = P_CPU_OFFLINE;
 
@@ -226,6 +216,7 @@ int p_cpu_dead_action(unsigned int p_cpu) {
       p_cpu_rehash("offline");
    }
 
+   read_unlock(&p_config_lock);
    /* God mode off ;) */
 //   spin_unlock_irqrestore(&p_db_lock,p_db_flags);
    spin_unlock(&p_db_lock);

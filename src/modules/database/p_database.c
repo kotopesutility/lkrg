@@ -23,8 +23,8 @@ int hash_from_ex_table(void) {
 
    unsigned long p_tmp = 0;
 
-   p_db.kernel_ex_table.p_addr = (unsigned long *)P_SYM(p_kallsyms_lookup_name)("__start___ex_table");
-   p_tmp = (unsigned long)P_SYM(p_kallsyms_lookup_name)("__stop___ex_table");
+   p_db.kernel_ex_table.p_addr = (unsigned long *)P_SYM_CALL(p_kallsyms_lookup_name, "__start___ex_table");
+   p_tmp = (unsigned long)P_SYM_CALL(p_kallsyms_lookup_name, "__stop___ex_table");
 
    if (!p_db.kernel_ex_table.p_addr || !p_tmp || p_tmp < (unsigned long)p_db.kernel_ex_table.p_addr) {
       return P_LKRG_GENERAL_ERROR;
@@ -47,8 +47,8 @@ int hash_from_kernel_stext(void) {
 
    unsigned long p_tmp = 0;
 
-   p_db.kernel_stext.p_addr = (unsigned long *)P_SYM(p_kallsyms_lookup_name)("_stext");
-   p_tmp = (unsigned long)P_SYM(p_kallsyms_lookup_name)("_etext");
+   p_db.kernel_stext.p_addr = (unsigned long *)P_SYM_CALL(p_kallsyms_lookup_name, "_stext");
+   p_tmp = (unsigned long)P_SYM_CALL(p_kallsyms_lookup_name, "_etext");
 
    if (!p_db.kernel_stext.p_addr || !p_tmp || p_tmp < (unsigned long)p_db.kernel_stext.p_addr) {
       return P_LKRG_GENERAL_ERROR;
@@ -84,8 +84,8 @@ int hash_from_kernel_rodata(void) {
 
    unsigned long p_tmp = 0;
 
-   p_db.kernel_rodata.p_addr = (unsigned long *)P_SYM(p_kallsyms_lookup_name)("__start_rodata");
-   p_tmp = (unsigned long)P_SYM(p_kallsyms_lookup_name)("__end_rodata");
+   p_db.kernel_rodata.p_addr = (unsigned long *)P_SYM_CALL(p_kallsyms_lookup_name, "__start_rodata");
+   p_tmp = (unsigned long)P_SYM_CALL(p_kallsyms_lookup_name, "__end_rodata");
 
    if (!p_db.kernel_rodata.p_addr || !p_tmp || p_tmp < (unsigned long)p_db.kernel_rodata.p_addr) {
       return P_LKRG_GENERAL_ERROR;
@@ -117,8 +117,8 @@ int hash_from_iommu_table(void) {
 #ifdef CONFIG_X86
    unsigned long p_tmp = 0;
 
-   p_db.kernel_iommu_table.p_addr = (unsigned long *)P_SYM(p_kallsyms_lookup_name)("__iommu_table");
-   p_tmp = (unsigned long)P_SYM(p_kallsyms_lookup_name)("__iommu_table_end");
+   p_db.kernel_iommu_table.p_addr = (unsigned long *)P_SYM_CALL(p_kallsyms_lookup_name, "__iommu_table");
+   p_tmp = (unsigned long)P_SYM_CALL(p_kallsyms_lookup_name, "__iommu_table_end");
 
    if (!p_db.kernel_iommu_table.p_addr || !p_tmp || p_tmp < (unsigned long)p_db.kernel_iommu_table.p_addr) {
       return P_LKRG_GENERAL_ERROR;
@@ -196,11 +196,6 @@ int p_create_database(void) {
 #endif
 
    /*
-    * First gather information about CPUs in the system - CRITICAL !!!
-    */
-   p_get_cpus(&p_db.p_cpu);
-
-   /*
     * OK, we now know what is the maximum number of supported CPUs
     * in this kernel, let's allocate data here...
     */
@@ -211,7 +206,7 @@ int p_create_database(void) {
     * __GFP_NOFAIL flag will always generate slowpath warn because developers
     * decided to depreciate this flag ;/
     */
-   if ( (p_db.p_CPU_metadata_array = kzalloc(sizeof(p_CPU_metadata_hash_mem)*p_db.p_cpu.p_nr_cpu_ids,
+   if ( (p_db.p_CPU_metadata_array = kzalloc(sizeof(p_CPU_metadata_hash_mem)*nr_cpu_ids,
                                                                   GFP_KERNEL | __GFP_REPEAT)) == NULL) {
       /*
        * I should NEVER be here!
@@ -219,15 +214,20 @@ int p_create_database(void) {
       p_print_log(P_LOG_FATAL, "Can't allocate memory for CPU metadata");
       return P_LKRG_GENERAL_ERROR;
    }
-// STRONG_DEBUG
-     else {
-        p_debug_log(P_LOG_FLOOD,
-               "<p_create_database> p_db.p_CPU_metadata_array[0x%lx] with requested size[%d] "
-               "= sizeof(p_CPU_metadata_hash_mem)[%d] * p_db.p_cpu.p_nr_cpu_ids[%d]",
-               (unsigned long)p_db.p_CPU_metadata_array,
-               (int)(sizeof(p_CPU_metadata_hash_mem)*p_db.p_cpu.p_nr_cpu_ids),
-               (int)sizeof(p_CPU_metadata_hash_mem),p_db.p_cpu.p_nr_cpu_ids);
-   }
+
+   p_read_cpu_lock();
+
+   /*
+    * First gather information about CPUs in the system - CRITICAL !!!
+    */
+   p_get_cpus(&p_db.p_cpu);
+
+   p_debug_log(P_LOG_FLOOD,
+          "<p_create_database> p_db.p_CPU_metadata_array[0x%lx] with requested size[%d] "
+          "= sizeof(p_CPU_metadata_hash_mem)[%d] * nr_cpu_ids[%d]",
+          (unsigned long)p_db.p_CPU_metadata_array,
+          (int)(sizeof(p_CPU_metadata_hash_mem)*nr_cpu_ids),
+          (int)sizeof(p_CPU_metadata_hash_mem),nr_cpu_ids);
 
    /*
     * OK, we have prepared all necessary memory. Let's try X86 specific
@@ -269,6 +269,7 @@ int p_create_database(void) {
 //   smp_call_function_single(p_tmp_cpu,p_dump_CPU_metadata,p_db.p_CPU_metadata_array,true);
 
    p_db.p_CPU_metadata_hashes = hash_from_CPU_data(p_db.p_CPU_metadata_array);
+   p_read_cpu_unlock();
 
    /* Some arch needs extra hooks */
    if (p_register_arch_metadata() != P_LKRG_SUCCESS) {
@@ -299,7 +300,7 @@ int p_create_database(void) {
 #endif
 
 #if defined(CONFIG_OPTPROBES)
-   P_SYM(p_wait_for_kprobe_optimizer)();
+   P_SYM_CALL(p_wait_for_kprobe_optimizer);
 #endif
    smp_mb();
 
@@ -309,7 +310,7 @@ int p_create_database(void) {
     * Memory allocation may fail... let's loop here!
     */
    while(p_kmod_hash(&p_db.p_module_list_nr,&p_db.p_module_list_array,
-                     &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 0x1) != P_LKRG_SUCCESS)
+                     &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 1) != P_LKRG_SUCCESS)
       schedule();
 
    /* Hash */
@@ -334,7 +335,7 @@ int p_create_database(void) {
 
    P_SYM(p_state_init) = 1;
 #if defined(CONFIG_OPTPROBES)
-   P_SYM(p_wait_for_kprobe_optimizer)();
+   P_SYM_CALL(p_wait_for_kprobe_optimizer);
 #endif
    smp_mb();
 

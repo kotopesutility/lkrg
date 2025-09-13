@@ -26,42 +26,29 @@
  */
 
 #include "../../../../p_lkrg_main.h"
+#include "../../../exploit_detection/syscalls/p_install.h"
 
-
-char p_arch_jump_label_transform_kretprobe_state = 0;
 p_lkrg_counter_lock p_jl_lock;
 
-static struct kretprobe p_arch_jump_label_transform_kretprobe = {
-#if defined(CONFIG_ARM64) && defined(HAVE_JUMP_LABEL_BATCH)
-    .kp.symbol_name = "arch_jump_label_transform_queue",
-#else
-    .kp.symbol_name = "arch_jump_label_transform",
-#endif
-    .handler = p_arch_jump_label_transform_ret,
-    .entry_handler = p_arch_jump_label_transform_entry,
-    .data_size = sizeof(struct p_arch_jump_label_transform_data),
-};
 
-
-notrace int p_arch_jump_label_transform_entry(struct kretprobe_instance *p_ri, struct pt_regs *p_regs) {
+static notrace int p_arch_jump_label_transform_entry(struct kretprobe_instance *p_ri, struct pt_regs *p_regs) {
 
    struct jump_entry *p_tmp = (struct jump_entry *)p_regs_get_arg1(p_regs);
    unsigned long p_addr = p_jump_entry_code(p_tmp);
    struct module *p_module = NULL;
-   unsigned long p_flags;
 
    p_debug_kprobe_log(
           "p_arch_jump_label_transform_entry: comm[%s] Pid:%d",current->comm,current->pid);
 
    do {
-      p_lkrg_counter_lock_lock(&p_jl_lock, &p_flags);
+      p_lkrg_counter_lock_lock(&p_jl_lock);
       if (!p_lkrg_counter_lock_val_read(&p_jl_lock))
          break;
-      p_lkrg_counter_lock_unlock(&p_jl_lock, &p_flags);
+      p_lkrg_counter_lock_unlock(&p_jl_lock);
       cpu_relax();
    } while(1);
    p_lkrg_counter_lock_val_inc(&p_jl_lock);
-   p_lkrg_counter_lock_unlock(&p_jl_lock, &p_flags);
+   p_lkrg_counter_lock_unlock(&p_jl_lock);
 
    p_print_log(P_LOG_WATCH,
                "[JUMP_LABEL] New modification: type[%s] code[0x%lx] target[0x%lx] key[0x%lx]!",
@@ -72,7 +59,7 @@ notrace int p_arch_jump_label_transform_entry(struct kretprobe_instance *p_ri, s
                p_jump_entry_target(p_tmp),
                (unsigned long)p_jump_entry_key(p_tmp));
 
-   if (P_SYM(p_core_kernel_text)(p_addr)) {
+   if (P_SYM_CALL(p_core_kernel_text, p_addr)) {
       /*
        * OK, *_JUMP_LABEL tries to modify kernel core .text section
        */
@@ -98,7 +85,7 @@ notrace int p_arch_jump_label_transform_entry(struct kretprobe_instance *p_ri, s
 }
 
 
-notrace int p_arch_jump_label_transform_ret(struct kretprobe_instance *ri, struct pt_regs *p_regs) {
+static notrace int p_arch_jump_label_transform_ret(struct kretprobe_instance *ri, struct pt_regs *p_regs) {
 
    unsigned int p_tmp,p_tmp2;
    unsigned char p_flag = 0;
@@ -151,6 +138,7 @@ notrace int p_arch_jump_label_transform_ret(struct kretprobe_instance *ri, struc
                /*
                 * Because we update module's .text section hash we need to update KOBJs as well.
                 */
+               p_flag = 0;
                for (p_tmp2 = 0; p_tmp2 < p_db.p_module_kobj_nr; p_tmp2++) {
                   if (p_db.p_module_kobj_array[p_tmp2].p_mod == p_db.p_jump_label.p_mod) {
                      p_db.p_module_kobj_array[p_tmp2].p_mod_core_text_hash =
@@ -197,41 +185,17 @@ notrace int p_arch_jump_label_transform_ret(struct kretprobe_instance *ri, struc
    return 0;
 }
 
+static struct lkrg_probe p_arch_jump_label_transform_probe = {
+  .type = LKRG_KRETPROBE,
+  .krp = {
+#if defined(CONFIG_ARM64) && defined(HAVE_JUMP_LABEL_BATCH)
+    .kp.symbol_name = "arch_jump_label_transform_queue",
+#else
+    .kp.symbol_name = "arch_jump_label_transform",
+#endif
+    .handler = p_arch_jump_label_transform_ret,
+    .entry_handler = p_arch_jump_label_transform_entry,
+  }
+};
 
-int p_install_arch_jump_label_transform_hook(void) {
-
-   int p_tmp;
-
-   p_lkrg_counter_lock_init(&p_jl_lock);
-
-   p_arch_jump_label_transform_kretprobe.maxactive = p_get_kprobe_maxactive();
-   if ( (p_tmp = register_kretprobe(&p_arch_jump_label_transform_kretprobe)) != 0) {
-      p_print_log(P_LOG_FATAL, "[kretprobe] register_kretprobe() for <%s> failed! [err=%d]",
-                  p_arch_jump_label_transform_kretprobe.kp.symbol_name,
-                  p_tmp);
-      return P_LKRG_GENERAL_ERROR;
-   }
-   p_print_log(P_LOG_WATCH, "Planted [kretprobe] <%s> at: 0x%lx",
-               p_arch_jump_label_transform_kretprobe.kp.symbol_name,
-               (unsigned long)p_arch_jump_label_transform_kretprobe.kp.addr);
-   p_arch_jump_label_transform_kretprobe_state = 1;
-
-   return P_LKRG_SUCCESS;
-}
-
-
-void p_uninstall_arch_jump_label_transform_hook(void) {
-
-   if (!p_arch_jump_label_transform_kretprobe_state) {
-      p_print_log(P_LOG_WATCH, "[kretprobe] <%s> at 0x%lx is NOT installed",
-                  p_arch_jump_label_transform_kretprobe.kp.symbol_name,
-                  (unsigned long)p_arch_jump_label_transform_kretprobe.kp.addr);
-   } else {
-      unregister_kretprobe(&p_arch_jump_label_transform_kretprobe);
-      p_print_log(P_LOG_WATCH, "Removing [kretprobe] <%s> at 0x%lx nmissed[%d]",
-                  p_arch_jump_label_transform_kretprobe.kp.symbol_name,
-                  (unsigned long)p_arch_jump_label_transform_kretprobe.kp.addr,
-                  p_arch_jump_label_transform_kretprobe.nmissed);
-      p_arch_jump_label_transform_kretprobe_state = 0;
-   }
-}
+GENERATE_INSTALL_FUNC(arch_jump_label_transform)

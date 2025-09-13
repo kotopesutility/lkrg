@@ -40,17 +40,13 @@
 // not recommended - will be too noisy for some notifiers! :)
 //#define P_LKRG_NOTIFIER_DBG
 
-// Debug every time we enter/exit *kprobed* function?
-// not recommended - will be very noisy...
-//#define P_LKRG_STRONG_KPROBE_DEBUG
-
 
 /*
  * Error codes
  */
 
 // Everything is fine...
-#define P_LKRG_SUCCESS                        0x0
+#define P_LKRG_SUCCESS                        0
 
 // General error
 #define P_LKRG_GENERAL_ERROR                  -1
@@ -108,9 +104,9 @@
 ({                                                                                         \
    int p_print_ret = 0;                                                                    \
                                                                                            \
-   if (p_level == P_LOG_ALERT)                                                             \
+   if ((p_level) == P_LOG_ALERT)                                                           \
       p_print_ret = printk(KERN_CRIT    P_LKRG_SIGNATURE "ALERT: " p_fmt "\n", ## p_args); \
-   else if (P_CTRL(p_log_level) >= (p_level & 7))                                          \
+   else if (P_CTRL(p_log_level) >= ((p_level) & 7))                                        \
    switch (p_level) {                                                                      \
    default: /* Pacify clang warning about no case P_LOG_ALERT, which we handle above */    \
       break;                                                                               \
@@ -162,7 +158,7 @@
  #define p_debug_notifier_log(p_fmt, p_args...)                                          \
                   p_debug_log(P_LOG_FLOOD, p_fmt, ## p_args)
 #else
- #define p_debug_notifier_log(p_fmt, p_args...)  ({ 0x0; })
+ #define p_debug_notifier_log(p_fmt, p_args...)  ({ 0; })
 #endif
 
 #ifdef P_LKRG_STRONG_KPROBE_DEBUG
@@ -171,17 +167,17 @@
  #undef LKRG_DEBUG_TRACE
  #define LKRG_DEBUG_TRACE
 #else
- #define p_debug_kprobe_log(p_fmt, p_args...)    ({ 0x0; })
+ #define p_debug_kprobe_log(p_fmt, p_args...)    ({ 0; })
 #endif
 
 #define p_debug_log p_print_log
 
 #else
 
-#define p_debug_log(p_level, p_fmt, p_args...)  ({ 0x0; })
+#define p_debug_log(p_level, p_fmt, p_args...)  ({ 0; })
 
-#define p_debug_notifier_log(p_fmt, p_args...)  ({ 0x0; })
-#define p_debug_kprobe_log(p_fmt, p_args...)    ({ 0x0; })
+#define p_debug_notifier_log(p_fmt, p_args...)  ({ 0; })
+#define p_debug_kprobe_log(p_fmt, p_args...)    ({ 0; })
 
 #endif
 

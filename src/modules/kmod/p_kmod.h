@@ -35,6 +35,7 @@ typedef struct p_module_list_mem {
    void *p_module_core;
    unsigned int p_core_text_size;
    uint64_t p_mod_core_text_hash;
+   bool p_stale;
 
 } p_module_list_mem;
 
@@ -57,9 +58,6 @@ typedef struct p_module_kobj_mem {
 /* Module activity events */
 extern struct mutex p_module_activity;
 extern struct module *p_module_activity_ptr;
-
-void p_verify_module_live(struct module *p_mod);
-void p_verify_module_going(struct module *p_mod);
 
 int p_kmod_init(void);
 int p_kmod_hash(unsigned int *p_module_list_cnt_arg, p_module_list_mem **p_mlm_tmp,
