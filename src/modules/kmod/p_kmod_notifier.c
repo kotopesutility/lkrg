@@ -29,6 +29,11 @@ static struct notifier_block p_module_block_notifier = {
 
 };
 
+static const char * const p_mod_strings[] = {
+                          "New module is LIVE",
+                          "New module is COMING",
+                          "Module is GOING AWAY",
+                          "New module is UNFORMED yet" };
 
 static int p_block_always(void) {
 
@@ -48,9 +53,45 @@ static void p_module_notifier_wrapper(unsigned long p_event, struct module *p_km
    return;
 }
 
+static inline void p_verify_added_module(struct module *p_kmod) {
+
+   unsigned int p_tmp;
+   unsigned int p_found_mod = 0;
+
+   for (p_tmp = 0; p_tmp < p_db.p_module_list_nr; p_tmp++)
+      if (p_db.p_module_list_array[p_tmp].p_mod == p_kmod)
+         p_found_mod = 1;
+
+   if (!p_found_mod) {
+      p_print_log(P_LOG_ALERT, "DETECT: Newly loaded module entering LIVE state is hidden!");
+      /* Singularity rootkit is hooking print function
+       * and removes any messages containing "LKRG" string.
+       * Because of that, we are using here raw printk()
+       */
+      printk(KERN_CRIT "Hidden module:\n");
+      if (P_CTRL(p_log_level) >= P_LOG_WATCH)
+         printk(KERN_CRIT "\tPointer to struct module: [0x%lx]\n", (unsigned long)p_kmod);
+      printk(KERN_CRIT "\tName: [%s]\n", p_kmod->name);
+      printk(KERN_CRIT "\tState: [%d: %s]\n", p_kmod->state,
+                                              (p_kmod->state > MODULE_STATE_UNFORMED) ?
+                                              "WRONG STATE VALUE" :
+                                              p_mod_strings[p_kmod->state]);
+      /* We can do more here, e.g.,
+       *  - dump the entire module
+       *  - calculate hash from .text and behave like AV?
+       *  - more...
+       */
+      if (P_CTRL(p_kint_enforce) >= 2) {
+         // OK, we need to crash the kernel now
+         p_panic("Kernel: Newly loaded module [name: %s] in LIVE state is hidden!", p_kmod->name);
+      }
+   }
+}
+
+
 #if P_OVL_OVERRIDE_SYNC_MODE
-static notrace void p_verify_module_live(struct module *p_mod);
-static notrace void p_verify_module_going(struct module *p_mod);
+static void p_verify_module_live(struct module *p_mod);
+static void p_verify_module_going(struct module *p_mod);
 #else
 #define p_verify_module_live(p_mod)
 #define p_verify_module_going(p_mod)
@@ -71,12 +112,6 @@ static notrace void p_verify_module_going(struct module *p_mod);
 static int p_module_event_notifier(struct notifier_block *p_this, unsigned long p_event, void *p_kmod) {
 
    struct module *p_tmp = p_kmod;
-
-   static const char * const p_mod_strings[] = {
-                             "New module is LIVE",
-                             "New module is COMING",
-                             "Module is GOING AWAY",
-                             "New module is UNFORMED yet" };
 
 // STRONG_DEBUG
    p_debug_log(P_LOG_FLOOD,
@@ -220,6 +255,9 @@ static int p_module_event_notifier(struct notifier_block *p_this, unsigned long 
                            &p_db.p_module_kobj_nr,&p_db.p_module_kobj_array, 2) != P_LKRG_SUCCESS)
             schedule();
 
+         if (p_module_core(p_tmp) && p_core_text_size(p_tmp))
+            p_verify_added_module(p_tmp);
+
          /* Update global module list/kobj hash */
          p_db.p_module_list_hash = p_lkrg_fast_hash((unsigned char *)p_db.p_module_list_array,
                                              (unsigned int)p_db.p_module_list_nr * sizeof(p_module_list_mem));
@@ -258,7 +296,7 @@ p_module_event_notifier_activity_out:
 }
 
 #if P_OVL_OVERRIDE_SYNC_MODE
-static notrace void p_verify_module_live(struct module *p_mod) {
+static void p_verify_module_live(struct module *p_mod) {
 
    if (p_ovl_override_sync_probe.state != LKRG_PROBE_OFF) {
       /* We do not need to do anything for now */
@@ -291,7 +329,7 @@ static notrace void p_verify_module_live(struct module *p_mod) {
    }
 }
 
-static notrace void p_verify_module_going(struct module *p_mod) {
+static void p_verify_module_going(struct module *p_mod) {
 
    if (p_ovl_override_sync_probe.state == LKRG_PROBE_OFF) {
       /* We do not need to do anything for now */

@@ -190,6 +190,7 @@ typedef struct _p_lkrg_global_conf_structure {
 typedef struct _p_lkrg_global_symbols_structure {
 
    unsigned long (*p_kallsyms_lookup_name)(const char *name);
+   unsigned int *p_freeze_timeout_msecs;
    int (*p_freeze_processes)(void);
    void (*p_thaw_processes)(void);
 #if !defined(CONFIG_ARM64)
@@ -376,7 +377,7 @@ extern p_ro_page p_ro;
 #endif
 
 #define GENERATE_CALL_FUNC(type, name, ...) \
-   notrace noinline GENERATE_CALL_FUNC_ATTR type call_##name(__VA_ARGS__) { \
+   noinline GENERATE_CALL_FUNC_ATTR type call_##name(__VA_ARGS__) { \
       __asm__ __volatile__ (GENERATE_CALL_FUNC_ASM :: "m" (P_SYM(name))); \
    } \
    STACK_FRAME_NON_STANDARD(call_##name);

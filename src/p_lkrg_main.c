@@ -424,6 +424,65 @@ static void p_parse_module_params(void) {
 
 }
 
+static void __init p_freeze_userspace(void) {
+
+   unsigned int timeout, tries, orig_timeout, sleep_ms;
+
+   /* Save the original freeze timeout that may have been set by the user */
+   orig_timeout = *P_SYM(p_freeze_timeout_msecs);
+
+   /* Start with a freeze timeout of 2000 ms and a sleep duration of 100 ms */
+   timeout = min(2000U, orig_timeout);
+   sleep_ms = 100;
+
+   /*
+    * Freeze all user tasks with incremental timeouts and sleeps in between. The
+    * reason for starting with a shorter timeout is that a task blocking the
+    * freeze may depend on work from an already-frozen task in order to become
+    * unblocked. In this case, the freeze attempt will always continue until the
+    * timeout is reached, resulting in a long stall where most of userspace is
+    * frozen. The blocking task will always be running somewhere in the kernel,
+    * which is why it is blocking in the first place: it can't just teleport
+    * into the refrigerator when it's already stuck in some other kernel code.
+    *
+    * Some systems may legitimately require more time in order to freeze all
+    * user tasks, which is accommodated by incrementally scaling up the timeout
+    * duration.
+    *
+    * After a failed freeze attempt, we must wait a little bit to allow the
+    * blocking tasks to hopefully make enough forward progress to become
+    * unblocked. There's no precise way to track this, as the freezer is
+    * completely unaware of inter-process dependencies that must be satisfied to
+    * unblock a task.
+    */
+   *P_SYM(p_freeze_timeout_msecs) = timeout;
+   for (tries = 1; P_SYM_CALL(p_freeze_processes); tries++) {
+      /* Scale up after every 3 failed attempts */
+      if (!(tries % 3)) {
+         /* Don't sleep longer than 500 ms at a time (it probably won't help) */
+         sleep_ms = min(sleep_ms + 100, 500U);
+
+         /* Increase the timeout, capping it to the original timeout duration */
+         timeout = min(timeout * 2, orig_timeout);
+         *P_SYM(p_freeze_timeout_msecs) = timeout;
+      }
+
+      p_print_log(P_LOG_ISSUE, "Freezing failed %u time(s), sleeping %u ms before next try with timeout of %u ms",
+                  tries, sleep_ms, timeout);
+
+      /* Sleep for a bit to give blocking tasks some time to become unblocked */
+      msleep(sleep_ms);
+   }
+
+   /*
+    * Restore the original freeze timeout. We may overwrite a userspace change
+    * to the freeze timeout via /sys/power/pm_freeze_timeout if the change
+    * occurred between when we cached the original timeout and now. This
+    * shouldn't be a big deal.
+    */
+   *P_SYM(p_freeze_timeout_msecs) = orig_timeout;
+}
+
 /*
  * Main entry point for the module - initialization.
  */
@@ -484,6 +543,7 @@ static int __init p_lkrg_register(void) {
       return P_LKRG_GENERAL_ERROR;
    }
 
+   P_SYM_INIT(freeze_timeout_msecs)
    P_SYM_INIT(freeze_processes)
    P_SYM_INIT(thaw_processes)
 #if defined(CONFIG_X86) && LINUX_VERSION_CODE >= KERNEL_VERSION(5,8,0)
@@ -498,8 +558,7 @@ static int __init p_lkrg_register(void) {
 #endif
 
    // Freeze all non-kernel processes
-   while (P_SYM_CALL(p_freeze_processes))
-      schedule();
+   p_freeze_userspace();
 
    p_freeze = 1;
 
@@ -583,12 +642,6 @@ static int __init p_lkrg_register(void) {
       goto p_main_error;
    }
 
-#ifdef LKRG_WITH_HIDE
-   if (P_CTRL(p_hide_lkrg)) {
-      p_hide_itself();
-   }
-#endif
-
    p_integrity_timer();
    p_register_notifiers();
    p_init_page_attr();
@@ -601,6 +654,9 @@ p_main_error:
 
    if (p_ret != P_LKRG_SUCCESS) {
       p_print_log(P_LOG_DYING, "Not loading LKRG (initialization failed)");
+      p_deregister_comm_channel();
+      if (p_attr_init)
+         p_uninit_page_attr();
       P_CTRL(p_kint_validate) = 0;
       p_deregister_notifiers();
       if (p_timer.function)
@@ -630,8 +686,6 @@ p_main_error:
          p_kzfree(p_db.p_CPU_metadata_array);
          p_db.p_CPU_metadata_array = NULL;
       }
-      if (p_attr_init)
-         p_uninit_page_attr();
 #if defined(P_LKRG_JUMP_LABEL_STEXT_DEBUG)
       if (p_db.kernel_stext_copy)
          vfree(p_db.kernel_stext_copy);

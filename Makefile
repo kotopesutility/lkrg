@@ -16,6 +16,8 @@ else
     KERNEL := /lib/modules/$(P_KVER)/build
 endif
 
+DUMMY_FUNC_OBJ := src/modules/integrity_timer/verify_kprobes/p_dummy_func.o
+
 #
 # Use DEBUG=on for debug build.
 #
@@ -23,6 +25,24 @@ ifeq ($(DEBUG), on)
 ccflags-m := -ggdb -DP_LKRG_DEBUG_BUILD -finstrument-functions
 ccflags-y := ${ccflags-m}
 $(TARGET)-objs += src/modules/print_log/p_lkrg_debug_log.o
+else
+# Remove trace-related flags so ftrace cannot probe LKRG's functions. This is
+# akin to specifying 'notrace' on every function, except that this removes even
+# more code transformations than 'notrace' alone.
+#
+# The '%' is a wildcard to match any number of characters in a word. This covers
+# variations of these flags that have an optional argument assigned via '='.
+REMOVE_FLAGS := -finstrument-functions% \
+		-flive-patching% \
+		-fpatchable-function-entry% \
+		-fprofile% \
+		-mhotpatch% \
+		-p \
+		-pg
+
+# Keep trace-related flags on the dummy func so it can be used to verify kprobes
+CFLAGS_$(DUMMY_FUNC_OBJ) := $(filter $(REMOVE_FLAGS),$(KBUILD_CFLAGS))
+KBUILD_CFLAGS := $(filter-out $(REMOVE_FLAGS),$(KBUILD_CFLAGS))
 endif
 
 obj-m += $(TARGET).o
@@ -30,6 +50,7 @@ $(TARGET)-objs += src/modules/ksyms/p_resolve_ksym.o \
                   src/modules/hashing/p_lkrg_fast_hash.o \
                   src/modules/comm_channel/p_comm_channel.o \
                   src/modules/integrity_timer/p_integrity_timer.o \
+                  $(DUMMY_FUNC_OBJ) \
                   src/modules/integrity_timer/verify_kprobes/p_verify_kprobes.o \
                   src/modules/kmod/p_kmod.o \
                   src/modules/net/net.o \
